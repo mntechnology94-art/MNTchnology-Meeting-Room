@@ -18,7 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let activeCode='',room=null,name='Guest',activeTitle='MNTchnology Meeting',role='Guest';
   let peerId=sessionStorage.getItem('mnt_peer_id')||((crypto.randomUUID&&crypto.randomUUID())||Math.random().toString(36).slice(2));
-  let selectedPeerId=null,screenOwnerId=null,focusPeerId=null,annotationStrokes=[],redoStrokes=[],annotationEnabled=false;
+  let selectedPeerId=null,screenOwnerId=null,annotationStrokes=[],redoStrokes=[],annotationEnabled=false;
   let currentCameraDeviceId=null,screenPublishing=false;
   sessionStorage.setItem('mnt_peer_id',peerId);
   const isHost=()=>role==='Host';
@@ -35,25 +35,9 @@ document.addEventListener('DOMContentLoaded', () => {
     $('#videoGrid').appendChild(t);return t;
   }
   function selectMainTile(id){
-    if(!id)return;
-    if(selectedPeerId===id && focusPeerId===id){
-      focusPeerId=null;
-      $$('#videoGrid .tile').forEach(x=>x.classList.remove('main-tile','focused-tile'));
-      $('#videoGrid')?.classList.remove('focus-mode');
-      updateAnnotationLayer();
-      return;
-    }
-    if(selectedPeerId===id){
-      focusPeerId=id;
-      $('#videoGrid')?.classList.add('focus-mode');
-      $$('#videoGrid .tile').forEach(x=>{x.classList.remove('main-tile','focused-tile');if(x.dataset.peerTile===id)x.classList.add('main-tile','focused-tile')});
-      updateAnnotationLayer();
-      return;
-    }
+    if(selectedPeerId===id && screenOwnerId && id!==screenOwnerId) id=screenOwnerId;
     selectedPeerId=id;
-    focusPeerId=id;
-    $('#videoGrid')?.classList.add('focus-mode');
-    $$('#videoGrid .tile').forEach(x=>{x.classList.remove('main-tile','focused-tile');if(x.dataset.peerTile===id)x.classList.add('main-tile','focused-tile')});
+    $$('#videoGrid .tile').forEach(x=>x.classList.toggle('main-tile',x.dataset.peerTile===id));
     updateAnnotationLayer();
   }
   function setScreenOwner(id,active){
@@ -128,7 +112,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderPeople(){const box=$('#participantsPanel .messages');if(!box)return;const arr=[{id:identityFor(),name,local:true},...(room?[...room.remoteParticipants.values()].map(p=>({id:p.identity,name:displayNameForParticipant(p)})):[])];box.innerHTML=`<p><b>Participants (${arr.length})</b></p>`+arr.map(x=>`<p>🎙 <b>${esc(x.name)}${x.local?' (You)':''}</b></p>`).join('')}
   function ensureParticipantTiles(){if(room){tile(peerId,name);for(const p of room.remoteParticipants.values())tile(p.identity,displayNameForParticipant(p));}}
-  function restoreAllTiles(){focusPeerId=null;$('#videoGrid')?.classList.remove('focus-mode');$$('#videoGrid .tile').forEach(x=>x.classList.remove('main-tile','focused-tile'));}
 
   async function fetchToken(code){
     const identity=identityFor();
@@ -170,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
       selectMainTile(peerId);
       await room.localParticipant.setCameraEnabled(true);
       renderLocalCamera();
-      await room.localParticipant.setMicrophoneEnabled(true,{echoCancellation:true,noiseSuppression:true,autoGainControl:true});
+      await room.localParticipant.setMicrophoneEnabled(true);
       setRoomMeta(activeTitle,`● ${room.remoteParticipants.size+1} participant${room.remoteParticipants.size+1===1?'':'s'}`);
       renderPeople();
     }catch(e){console.error(e);setRoomMeta(activeTitle,'Connection error');alert(`Meeting connect wenne naha. ${e.message||''}`);await leave(true)}
@@ -178,11 +161,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function leave(silent=false){
     try{if(room){await room.disconnect()}}catch{}
-    room=null;screenPublishing=false;activeCode='';screenOwnerId=null;focusPeerId=null;annotationStrokes=[];redoStrokes=[];$('#videoGrid').classList.remove('focus-mode');$('#videoGrid').innerHTML='';if(!silent)showPage('home')
+    room=null;screenPublishing=false;activeCode='';screenOwnerId=null;annotationStrokes=[];redoStrokes=[];$('#videoGrid').innerHTML='';if(!silent)showPage('home')
   }
   async function startScreen(){
     if(!room||screenPublishing)return;
-    try{await room.localParticipant.setScreenShareEnabled(true,{audio:true,selfBrowserSurface:'exclude',surfaceSwitching:'include',systemAudio:'include'});setScreenOwner(identityFor(),true)}catch(e){console.warn('screen share',e);alert('Screen share start karanna bari una. Browser permission eka allow karanna.')}
+    try{await room.localParticipant.setScreenShareEnabled(true,{audio:true,selfBrowserSurface:'exclude',surfaceSwitching:'include',systemAudio:'include'});setScreenOwner(identityFor(),true)}catch(e){console.warn('screen share',e)}
   }
   async function stopScreen(){if(!room||!screenPublishing)return;try{await room.localParticipant.setScreenShareEnabled(false)}catch{}screenPublishing=false}
 

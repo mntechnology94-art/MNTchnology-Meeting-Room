@@ -35,9 +35,17 @@ document.addEventListener('DOMContentLoaded', () => {
     $('#videoGrid').appendChild(t);return t;
   }
   function selectMainTile(id){
-    if(selectedPeerId===id && screenOwnerId && id!==screenOwnerId) id=screenOwnerId;
+    const grid=$('#videoGrid');
+    if(selectedPeerId===id){
+      selectedPeerId=null;
+      $$('#videoGrid .tile').forEach(x=>x.classList.remove('main-tile'));
+      grid?.classList.remove('focus-mode');
+      updateAnnotationLayer();
+      return;
+    }
     selectedPeerId=id;
     $$('#videoGrid .tile').forEach(x=>x.classList.toggle('main-tile',x.dataset.peerTile===id));
+    grid?.classList.add('focus-mode');
     updateAnnotationLayer();
   }
   function setScreenOwner(id,active){

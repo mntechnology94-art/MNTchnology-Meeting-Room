@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MNTchnology — Meetings</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <button class="brand logo-admin-trigger" id="logoAdminTrigger" aria-label="Open Admin Login"><img src="mntchnology-logo.jpg" alt="MN Technology logo"><span>MNT<span>chnology</span></span></button>
+      <nav>
+        <button class="nav-link active" data-page="home">Home</button>
+        <button class="nav-link" data-page="meetings">Meetings</button>
+        <button class="nav-link" data-page="schedule">Schedule</button>
+        <button class="nav-link" data-page="about">About</button>
+      
+      </nav>
+      <div class="auth-actions"><button class="host-register" id="hostRegister">Host Registration</button><button class="signin" id="signin">◉ &nbsp; Sign In</button></div>
+    </header>
+
+    <main>
+      <section id="home" class="page active-page">
+        <div class="hero">
+          <div class="hero-copy">
+            <div class="eyebrow">MNTchnology</div>
+            <h1><span>MN</span>Tchnology</h1>
+            <h2>Connect. Collaborate. Without Limits.</h2>
+            <p>Free online meetings with unlimited time.<br>No sign-up required. Just create, share and meet!</p>
+            <div class="hero-actions">
+              <button class="primary" data-page="create">▣ &nbsp; Create Meeting</button>
+              <button class="secondary" data-page="join">↗ &nbsp; Join Meeting</button>
+            </div>
+          </div>
+          <div class="hero-visual">
+            <div class="laptop">
+              <div class="screen">
+                <div class="person p1"></div><div class="person p2"></div>
+                <div class="person p3"></div><div class="person p4"></div>
+              </div>
+              <div class="base"></div>
+            </div>
+          </div>
+        </div>
+        <div class="feature-row">
+          <div><b>∞</b><strong>Unlimited<br>Meeting Time</strong></div>
+          <div><b>♧</b><strong>Multiple<br>Participants</strong></div>
+          <div><b>▣</b><strong>Screen<br>Sharing</strong></div>
+          <div><b>◌</b><strong>Live<br>Chat</strong></div>
+          <div><b>♢</b><strong>Secure<br>&amp; Private</strong></div>
+        </div>
+      </section>
+
+      <section id="create" class="page">
+        <div class="dashboard">
+          <aside class="sidebar">
+            <div class="side-brand"><span class="brand-mark">M</span> MNTchnology</div>
+            <button class="side-link active">⌂ <span>Home</span></button>
+            <button class="side-link" data-page="meetings">▣ <span>Meetings</span></button>
+            <button class="side-link">◉ <span>Recordings</span></button>
+            <button class="side-link">⚙ <span>Settings</span></button>
+          </aside>
+          <div class="content">
+            <h1>Create a Meeting</h1>
+            <p>Start a new meeting and invite your team, friends or students.</p>
+            <div class="form-card">
+              <label>Meeting Name (Optional)</label>
+              <input id="meetingName" value="Team Meeting">
+              <label class="check"><input type="checkbox" checked> Set a password (Optional)</label>
+              <input id="meetingPassword" value="1234" type="password">
+              <button class="primary full" id="createBtn">▣ &nbsp; Create Meeting</button>
+              <div class="share-box" id="shareBox">↗ &nbsp; Share your meeting link: <span>https://mntchnology.com/?room=abc123</span> <button id="copyBtn">▣</button></div>
+              <div class="form-note">● &nbsp; Unlimited time &nbsp; • &nbsp; No sign up required</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="meetings" class="page">
+        <div class="simple-page">
+          <h1>Meetings</h1>
+          <p>Your upcoming and recent MNTchnology meetings.</p>
+          <div class="meeting-list" id="meetingsList">
+            <div><b>Team Meeting</b><span>Today · 9:30 PM</span><button class="primary small" data-page="room">Join</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="schedule" class="page">
+        <div class="dashboard">
+          <aside class="sidebar">
+            <div class="side-brand"><span class="brand-mark">M</span> MNTchnology</div>
+            <button class="side-link" data-page="home">⌂ <span>Home</span></button>
+            <button class="side-link" data-page="meetings">▣ <span>Meetings</span></button>
+            <button class="side-link active" data-page="schedule">◷ <span>Schedule</span></button>
+            <button class="side-link">◉ <span>Recordings</span></button>
+            <button class="side-link">⚙ <span>Settings</span></button>
+          </aside>
+          <div class="content">
+            <h1>Schedule a Meeting</h1>
+            <p>රැස්වීම කලින් සැලසුම් කර ආරාධනා සබැඳිය බෙදා ගන්න.</p>
+            <div class="form-card">
+              <label>Meeting Name</label>
+              <input id="scheduleName" value="Class Meeting">
+              <label>Date</label>
+              <input id="scheduleDate" type="date">
+              <label>Start Time</label>
+              <input id="scheduleTime" type="time" value="09:00">
+              <label>Duration</label>
+              <select id="scheduleDuration"><option value="30">30 minutes</option><option value="60" selected>1 hour</option><option value="120">2 hours</option><option value="0">Unlimited</option></select>
+              <label>Meeting Password (Optional)</label>
+              <input id="schedulePassword" type="password" placeholder="Optional password">
+              <button class="primary full" id="scheduleBtn">◷ &nbsp; Schedule Meeting</button>
+              <div class="share-box" id="scheduleResult" style="display:none"></div>
+            </div>
+            <div class="meeting-list" id="scheduledList"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="join" class="page">
+        <div class="center-card">
+          <h1>Join a Meeting</h1>
+          <p>Enter the meeting link or code shared by your host.</p>
+          <input id="joinName" placeholder="Your name">
+          <input id="joinCode" placeholder="Meeting code or link">
+          <button class="primary full" id="joinMeetingBtn">Join Meeting</button>
+          <div class="form-note" id="joinNote">You can join as a guest. No account is required.</div>
+        </div>
+      </section>
+
+      <section id="room" class="page">
+        <div class="meeting-room">
+          <div class="room-top"><div class="room-brand"><span class="brand-mark">M</span> MNTchnology</div><div id="roomTitle">MNTchnology Meeting</div><div id="roomMeta">● Connecting…</div></div>
+          <div class="video-grid" id="videoGrid"></div>
+          <div class="room-controls">
+            <button>🎙<small>Mute</small></button><button>▣<small>Stop Video</small></button>
+            <button class="share">▣<small>Share Screen</small></button><button id="chatBtn">▢<small>Chat</small></button>
+            <button id="peopleBtn">♟<small>Participants</small></button><button>•••<small>More</small></button>
+            <button class="leave" data-page="home">Leave</button>
+          </div>
+          <aside class="chat-panel" id="chatPanel">
+            <div class="chat-head">Chat <button id="closeChat">×</button></div>
+            <div class="messages"><p><b>Sara</b> <small>10:24 AM</small><br>Hi everyone!</p><p><b>Amal</b> <small>10:25 AM</small><br>Can you share the project plan?</p><p><b>John</b> <small>10:26 AM</small><br>Sure, sharing now.</p><p><b>Nethmi</b> <small>10:28 AM</small><br>Looks good!</p></div>
+            <div class="chat-input"><input placeholder="Type a message..."><button>➤</button></div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="host-dashboard" class="page">
+        <div class="simple-page">
+          <h1>Host Dashboard</h1>
+          <p id="hostWelcome">Host account</p>
+          <div class="meeting-list">
+            <div><b>Host Status</b><span id="hostStatus">Pending Approval</span></div>
+            <div><b>Trial</b><span>7 days after admin approval</span></div>
+          </div>
+          <div class="form-card" style="margin-top:20px">
+            <h2 style="margin-top:0">Recording</h2>
+            <p>Recording controls: Start, Pause, Resume, Stop.</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin:15px 0">
+              <button class="primary small" id="recordStart">● Start Recording</button>
+              <button class="secondary small" id="recordPause" disabled>Ⅱ Pause</button>
+              <button class="secondary small" id="recordResume" disabled>▶ Resume</button>
+              <button class="secondary small" id="recordStop" disabled>■ Stop</button>
+            </div>
+            <div class="share-box" id="recordStatus">Recording not started.</div>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">
+              <button class="secondary small" id="connectDrive">Connect Google Drive</button>
+              <span class="pill pending" id="driveStatus">Not Connected</span>
+            </div>
+            <p class="form-note" style="margin-top:14px">Production: Google OAuth සම්බන්ධ කළ host ගේ Drive එකට recording automatic upload වෙනවා. මේ demo එකේ browser recording file එක download කරන්න පුළුවන්.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="about" class="page">
+        <div class="simple-page"><h1>About MNTchnology</h1><p>Connect • Collaborate • Create</p><div class="about-card">A clean, modern meeting experience designed for classrooms, teams and communities.</div></div>
+      </section>
+    
+      <section id="admin" class="page">
+        <div class="admin-wrap">
+          <div class="admin-head">
+            <div>
+              <div class="eyebrow admin-eyebrow">MNTchnology Administration</div>
+              <h1>Admin Panel</h1>
+              <p>Manage hosts, trials, payments, meeting limits and platform settings.</p>
+            </div>
+            <span class="admin-badge">OWNER · FREE FOREVER</span>
+          </div>
+
+          <div class="admin-stats">
+            <div><span>Hosts</span><b id="statHosts">24</b></div>
+            <div><span>On 7-Day Trial</span><b id="statTrials">6</b></div>
+            <div><span>Paid Hosts</span><b id="statPaid">14</b></div>
+            <div><span>Expired</span><b id="statExpired">4</b></div>
+          </div>
+
+          <div class="admin-tabs">
+            <button class="admin-tab active" data-admin-tab="hosts">Host Management</button>
+            <button class="admin-tab" data-admin-tab="settings">Platform Settings</button>
+            <button class="admin-tab" data-admin-tab="payments">Payments &amp; Bank</button>
+          </div>
+
+          <div id="admin-hosts" class="admin-panel active">
+            <div class="panel-title">
+              <div><h2>Host Management</h2><p>Approve hosts and control individual limits, trial and subscription status.</p></div>
+              <button class="primary small" id="saveHost">Save Changes</button>
+            </div>
+            <div class="host-table" id="hostTable">
+              <div class="host-row host-header"><b>Host</b><b>Status</b><b>Participants</b><b>Meeting Time</b><b>Trial / Paid</b><b>Action</b></div>
+              <div class="host-row" id="hostLoadingRow"><span><b>Loading host requests...</b><small>Supabase data load වෙමින්</small></span><span class="pill pending">Loading</span><span>—</span><span>—</span><span>—</span><span>—</span></div>
+            </div>
+            <div class="rule-box"><b>Owner account:</b> Your admin/owner account is configured as <b>Free Forever + Unlimited</b>. It is not affected by host subscription rules.</div>
+          </div>
+
+          <div id="admin-settings" class="admin-panel">
+            <div class="panel-title"><div><h2>Platform Settings</h2><p>These are the defaults new approved hosts receive. Individual hosts can override them.</p></div><button class="primary small" id="saveSettings">Save Settings</button></div>
+            <div class="settings-grid">
+              <label>Default Trial Days<input id="trialDays" type="number" value="7"></label>
+              <label>Default Participant Limit<input id="participantLimit" type="number" value="100"></label>
+              <label>Default Meeting Time (minutes)<input id="meetingLimit" value="Unlimited"></label>
+              <label>Monthly Payment Amount<input id="paymentAmount" value="LKR 1,500"></label>
+              <label>Payment Period<select><option>Monthly</option><option>Yearly</option></select></label>
+              <label>Student / Guest Access<select><option>Free</option><option>Disabled</option></select></label>
+            </div>
+            <div class="toggle-list">
+              <div><span><b>Require admin approval for new hosts</b><small>Host access starts only after you approve the account.</small></span><input type="checkbox" checked></div>
+              <div><span><b>Prevent repeated free trials</b><small>Use verified accounts and subscription records to prevent trial abuse.</small></span><input type="checkbox" checked></div>
+              <div><span><b>Automatic payment activation</b><small>Activate/renew only after a successful payment-gateway confirmation.</small></span><input type="checkbox" checked></div>
+            </div>
+          </div>
+
+          <div id="admin-payments" class="admin-panel">
+            <div class="panel-title"><div><h2>Payments &amp; Bank Settings</h2><p>Secure merchant and settlement configuration for host subscriptions.</p></div><button class="primary small" id="savePayment">Save Payment Settings</button></div>
+            <div class="settings-grid">
+              <label>Account Holder<input value="MNTchnology Owner"></label>
+              <label>Bank<input placeholder="Enter your bank"></label>
+              <label>Branch<input placeholder="Enter branch"></label>
+              <label>Settlement Account Number<input type="password" placeholder="••••••••••"></label>
+              <label>Merchant / Gateway ID<input placeholder="Gateway merchant ID"></label>
+              <label>Currency<select><option>LKR</option><option>USD</option></select></label>
+            </div>
+            <div class="gateway-card">
+              <div><b>Payment Gateway</b><small>Gateway connection is not active in this UI prototype. Production will verify payments through a server-side webhook before activating a host.</small></div>
+              <span class="pill pending">Not Connected</span>
+            </div>
+            <div class="payment-history">
+              <h3>Recent Payment History</h3>
+              <div><b>Sara Fernando</b><span>LKR 1,500 · Monthly</span><span class="pill paid">Verified</span><span>Sep 18, 2026</span></div>
+              <div><b>Ruwan Perera</b><span>LKR 1,500 · Monthly</span><span class="pill paid">Verified</span><span>Sep 16, 2026</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+  <script src="meeting-v45-livekit.js?v=47"></script>
+
+  <div class="host-register-overlay" id="hostRegisterOverlay">
+    <div class="host-register-card">
+      <div class="admin-login-icon">👤</div>
+      <h2>Host Registration</h2>
+      <p>Host account එකක් හදාගෙන meetings host කරන්න.</p>
+      <label>Host Email</label>
+      <input id="hostEmail" type="email" placeholder="host@example.com" autocomplete="email">
+      <label>Password</label>
+      <input id="hostPassword" type="password" placeholder="Create password" autocomplete="new-password">
+      <label>Confirm Password</label>
+      <input id="hostPasswordConfirm" type="password" placeholder="Confirm password" autocomplete="new-password">
+      <div class="host-register-note">Registration එකෙන් පස්සේ admin approval ලැබුණාම 7-day unlimited host trial එක start වෙනවා. Permission request එක platform ownerගේ email එකට automatic notification එකක් ලෙස යවනවා.</div>
+      <div class="admin-login-error" id="hostRegisterError"></div>
+      <div class="admin-login-actions">
+        <button class="secondary dark-btn" id="hostRegisterCancel">Cancel</button>
+        <button class="primary" id="hostRegisterBtn">Register</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="host-signin-overlay" id="hostSigninOverlay">
+    <div class="host-register-card">
+      <div class="admin-login-icon">🔑</div>
+      <h2>Host Sign In</h2>
+      <p>Register කරපු host email එකෙන් Sign In වෙන්න.</p>
+      <label>Host Email</label>
+      <input id="hostSigninEmail" type="email" placeholder="host@example.com" autocomplete="email">
+      <label>Password</label>
+      <input id="hostSigninPassword" type="password" placeholder="Password" autocomplete="current-password">
+      <div class="admin-login-error" id="hostSigninError"></div>
+      <div class="admin-login-actions">
+        <button class="secondary dark-btn" id="hostSigninCancel">Cancel</button>
+        <button class="primary" id="hostSigninBtn">Sign In</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="admin-login-overlay" id="adminLoginOverlay">
+    <div class="admin-login-card">
+      <div class="admin-login-icon">🔐</div>
+      <h2>Admin Login</h2>
+      <p>Admin Panel එකට enter වෙන්න email සහ password එක enter කරන්න.</p>
+      <label>Owner Email</label>
+      <input id="adminEmail" type="email" placeholder="owner@example.com" autocomplete="email">
+      <label>Admin Password</label>
+      <input id="adminPassword" type="password" placeholder="Enter admin password" autocomplete="current-password">
+      <button class="text-btn" id="adminForgotPassword" type="button">Forgot password?</button>
+      <div class="admin-login-error" id="adminLoginError">Email/password එක වැරදියි.</div>
+      <div class="admin-login-actions">
+        <button class="secondary dark-btn" id="adminCancel">Cancel</button>
+        <button class="primary" id="adminLoginBtn">Login</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="admin-login-overlay" id="adminResetOverlay">
+    <div class="admin-login-card">
+      <div class="admin-login-icon">🔑</div>
+      <h2>Reset Admin Password</h2>
+      <p>Aluth admin password ekak set karanna.</p>
+      <label>New Password</label>
+      <input id="newAdminPassword" type="password" placeholder="Create new password" autocomplete="new-password">
+      <label>Confirm Password</label>
+      <input id="newAdminPasswordConfirm" type="password" placeholder="Confirm new password" autocomplete="new-password">
+      <div class="admin-login-error" id="adminResetError"></div>
+      <div class="admin-login-actions">
+        <button class="secondary dark-btn" id="adminResetCancel">Cancel</button>
+        <button class="primary" id="adminResetBtn">Set New Password</button>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

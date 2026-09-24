@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let selectedPeerId=null,screenOwnerId=null,annotationStrokes=[],redoStrokes=[],annotationEnabled=false;
   let annotationTool='select',annotationColor='#ff2f2f',annotationToolbarClosed=false,annotationToolbarPosition=null;
   let annotationPipWindow=null,annotationPipOpening=false,annotationPipMinimized=false;
+  let annotationFileWindow=null,annotationFileUrl=null,annotationFileName='';
   let currentCameraDeviceId=null,screenPublishing=false;
   let participantFocus=false,suppressTileClickUntil=0,pipPosition=null;
   let meetingRecorder=null,meetingRecordStream=null,meetingRecordChunks=[];
@@ -231,6 +232,7 @@ document.addEventListener('DOMContentLoaded', () => {
     bar.innerHTML=`
       <button type="button" class="ann-tool active" id="annSelect" data-ann-tool="select" title="Mouse / Select"><span class="ann-icon">↖</span><small>Select</small></button>
       <button type="button" class="ann-tool" id="annPen" data-ann-tool="pen" title="Pencil"><span class="ann-icon">✎</span><small>Pen</small></button>
+      <button type="button" class="ann-tool" id="annOpenFile" title="Open image/PDF for annotation"><span class="ann-icon">▣</span><small>Open File</small></button>
       <div class="ann-color-wrap">
         <button type="button" class="ann-tool" id="annColor" title="Pencil color"><span class="ann-color-dot" id="annColorDot"></span><small>Color</small></button>
         <div class="ann-color-palette" id="annColorPalette" aria-label="Annotation colors">
@@ -303,6 +305,11 @@ document.addEventListener('DOMContentLoaded', () => {
       syncPersistentAnnotationToolbar();
     }));
     $('#annColorDot')?.style.setProperty('background',annotationColor);
+
+    const annFileInput=document.createElement('input');
+    annFileInput.type='file';annFileInput.accept='image/*,application/pdf';annFileInput.style.display='none';roomEl.appendChild(annFileInput);
+    $('#annOpenFile')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();annFileInput.value='';annFileInput.click()});
+    annFileInput.addEventListener('change',()=>{const f=annFileInput.files?.[0];if(f)openAnnotationFileWindow(f)});
 
     $('#annUndo').onclick=()=>{if(!isHost()||!annotationStrokes.length)return;redoStrokes.push(annotationStrokes.pop());drawAnnotations();sendAnnotationState();syncPersistentAnnotationToolbar()};
     $('#annRedo').onclick=()=>{if(!isHost()||!redoStrokes.length)return;annotationStrokes.push(redoStrokes.pop());drawAnnotations();sendAnnotationState();syncPersistentAnnotationToolbar()};
@@ -410,6 +417,7 @@ document.addEventListener('DOMContentLoaded', () => {
       $('#annotationToolbar [data-ann-tool="'+btn.dataset.pipTool+'"]')?.click();
       syncPersistentAnnotationToolbar();
     }));
+    d.getElementById('pipAnnOpenFile')?.addEventListener('click',()=>{$('#annOpenFile')?.click()});
     d.getElementById('pipAnnColor')?.addEventListener('click',()=>d.getElementById('pipAnnPalette')?.classList.toggle('open'));
     d.querySelectorAll('[data-pip-color]').forEach(btn=>btn.addEventListener('click',()=>{
       const color=btn.dataset.pipColor;const mainBtn=$('#annColorPalette [data-ann-color="'+color+'"]');
@@ -454,6 +462,60 @@ document.addEventListener('DOMContentLoaded', () => {
       updateAnnotationFloatButton();
       if(screenOwnerId)alert('Floating toolbar එක open කරන්න Annotate button එක click කරන්න. Browser එක Picture-in-Picture/Pop-up allow කරන්න.');
     }finally{annotationPipOpening=false}
+  }
+
+  function closeAnnotationFileWindow(){
+    try{if(annotationFileWindow&&!annotationFileWindow.closed)annotationFileWindow.close()}catch{}
+    annotationFileWindow=null;
+    if(annotationFileUrl){try{URL.revokeObjectURL(annotationFileUrl)}catch{};annotationFileUrl=null}
+  }
+
+  function drawAnnotationFileCanvas(extra){
+    const w=annotationFileWindow;if(!w||w.closed)return;
+    const c=w.document.getElementById('mntFileAnnCanvas');if(!c)return;
+    const ctx=c.getContext('2d');if(!ctx)return;
+    const dpr=Math.min(2,w.devicePixelRatio||1),cssW=Math.max(1,c.clientWidth),cssH=Math.max(1,c.clientHeight);
+    const pxW=Math.round(cssW*dpr),pxH=Math.round(cssH*dpr);
+    if(c.width!==pxW||c.height!==pxH){c.width=pxW;c.height=pxH}
+    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,cssW,cssH);ctx.lineCap='round';ctx.lineJoin='round';
+    const all=extra?[...annotationStrokes,extra]:annotationStrokes;
+    const baseWidth=Math.max(2.5,Math.min(cssW,cssH)/220),xy=p=>({x:(p?.x||0)*cssW,y:(p?.y||0)*cssH});
+    const drawOne=item=>{
+      if(!item)return;if(Array.isArray(item))item={type:'pen',color:'#ff2f2f',points:item};
+      const type=item.type||'pen',color=item.color||'#ff2f2f';ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=baseWidth;
+      if(type==='text'){const p=xy(item.point||item.points?.[0]);ctx.font=`700 ${Math.max(16,Math.round(Math.min(cssW,cssH)*.045))}px Inter,Segoe UI,Arial`;ctx.textBaseline='top';ctx.fillText(String(item.text||''),p.x,p.y);return}
+      const pts=Array.isArray(item.points)?item.points:[];if(!pts.length)return;
+      if(type==='pen'){ctx.beginPath();const a=xy(pts[0]);ctx.moveTo(a.x,a.y);for(let i=1;i<pts.length;i++){const q=xy(pts[i]);ctx.lineTo(q.x,q.y)}ctx.stroke();return}
+      const a=xy(pts[0]),b=xy(pts[1]||pts[0]);
+      if(type==='line'||type==='arrow'){ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();if(type==='arrow'){const ang=Math.atan2(b.y-a.y,b.x-a.x),len=Math.max(12,Math.min(28,Math.hypot(b.x-a.x,b.y-a.y)*.16));ctx.beginPath();ctx.moveTo(b.x,b.y);ctx.lineTo(b.x-len*Math.cos(ang-Math.PI/6),b.y-len*Math.sin(ang-Math.PI/6));ctx.moveTo(b.x,b.y);ctx.lineTo(b.x-len*Math.cos(ang+Math.PI/6),b.y-len*Math.sin(ang+Math.PI/6));ctx.stroke()}return}
+      if(type==='rect'){ctx.strokeRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y));return}
+      if(type==='circle'){const cx=(a.x+b.x)/2,cy=(a.y+b.y)/2,rx=Math.abs(b.x-a.x)/2,ry=Math.abs(b.y-a.y)/2;ctx.beginPath();ctx.ellipse(cx,cy,Math.max(.5,rx),Math.max(.5,ry),0,0,Math.PI*2);ctx.stroke()}
+    };
+    all.forEach(drawOne);
+  }
+
+  function openAnnotationFileWindow(file){
+    if(!isHost())return;
+    closeAnnotationFileWindow();annotationStrokes=[];redoStrokes=[];
+    annotationFileUrl=URL.createObjectURL(file);annotationFileName=file.name||'Class file';
+    const w=window.open('','MNTClassFile','popup=yes,width=1280,height=820,resizable=yes,scrollbars=no');
+    if(!w){alert('File window එක open කරන්න browser Pop-ups allow කරන්න.');return}
+    annotationFileWindow=w;
+    const isPdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name||'');
+    const media=isPdf?`<embed src="${annotationFileUrl}" type="application/pdf">`:`<img src="${annotationFileUrl}" alt="${annotationFileName.replace(/[&<>\"]/g,'')}">`;
+    w.document.open();w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${annotationFileName.replace(/[&<>]/g,'')}</title><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111;font-family:Segoe UI,Arial,sans-serif}.wrap{position:fixed;inset:0;background:#111}.media{position:absolute;inset:0;display:grid;place-items:center}.media img,.media embed{width:100%;height:100%;object-fit:contain;border:0;background:#fff}.top{position:fixed;left:12px;top:12px;z-index:30;background:#071a36e8;color:#fff;padding:8px 12px;border-radius:9px;font-size:13px;pointer-events:none}.hint{position:fixed;right:12px;top:12px;z-index:30;background:#071a36e8;color:#fff;padding:8px 12px;border-radius:9px;font-size:12px;pointer-events:none}#mntFileAnnCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:20;touch-action:none;cursor:crosshair}</style></head><body><div class="wrap"><div class="media">${media}</div><canvas id="mntFileAnnCanvas"></canvas></div><div class="top">${annotationFileName.replace(/[&<>]/g,'')}</div><div class="hint">MNT Annotation • Share this window</div></body></html>`);w.document.close();
+    const setup=()=>{
+      const c=w.document.getElementById('mntFileAnnCanvas');if(!c)return;
+      let drawing=false,current=null,lastBroadcast=0;
+      const pos=e=>{const r=c.getBoundingClientRect();return{x:Math.max(0,Math.min(1,(e.clientX-r.left)/Math.max(1,r.width))),y:Math.max(0,Math.min(1,(e.clientY-r.top)/Math.max(1,r.height)))}};
+      const commit=obj=>{if(!obj)return;annotationStrokes.push(obj);redoStrokes=[];current=null;drawing=false;drawAnnotationFileCanvas();drawAnnotations();sendAnnotationState();syncPersistentAnnotationToolbar()};
+      c.addEventListener('pointerdown',e=>{if(!isHost()||annotationTool==='select')return;e.preventDefault();const p=pos(e);if(annotationTool==='text'){const value=w.prompt('Text එක type කරන්න:','');if(value&&value.trim())commit({type:'text',color:annotationColor,point:p,text:value.trim().slice(0,160)});return}drawing=true;c.setPointerCapture?.(e.pointerId);current=annotationTool==='pen'?{type:'pen',color:annotationColor,points:[p]}:{type:annotationTool,color:annotationColor,points:[p,p]};drawAnnotationFileCanvas(current);sendAnnotationLive(current)});
+      c.addEventListener('pointermove',e=>{if(!drawing||!current)return;e.preventDefault();const p=pos(e);if(current.type==='pen')current.points.push(p);else current.points[1]=p;drawAnnotationFileCanvas(current);const now=performance.now();if(now-lastBroadcast>45){lastBroadcast=now;sendAnnotationLive(current)}});
+      const end=e=>{if(!drawing||!current)return;try{c.releasePointerCapture?.(e.pointerId)}catch{};commit(current)};c.addEventListener('pointerup',end);c.addEventListener('pointercancel',end);
+      w.addEventListener('resize',()=>drawAnnotationFileCanvas());w.addEventListener('beforeunload',()=>{if(annotationFileWindow===w)annotationFileWindow=null},{once:true});
+      if(annotationTool==='select')setTimeout(()=>$('#annPen')?.click(),0);drawAnnotationFileCanvas();
+    };
+    setTimeout(setup,120);
   }
 
   function resizeAnnotationCanvas(){
@@ -525,6 +587,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };
     all.forEach(drawOne);
+    if(annotationFileWindow&&!annotationFileWindow.closed)drawAnnotationFileCanvas(extra);
   }
   async function sendAnnotationState(){await publishData({kind:'annotation-state',strokes:annotationStrokes},true)}
   async function sendAnnotationLive(stroke){await publishData({kind:'annotation-live',strokes:annotationStrokes,live:stroke},false)}

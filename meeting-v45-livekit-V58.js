@@ -41,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
       else if(document.webkitFullscreenElement&&document.webkitExitFullscreen)document.webkitExitFullscreen();
     }catch{}
   }
+  document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&document.body.classList.contains('mnt-share-focus')){document.body.classList.remove('mnt-share-focus');setTimeout(()=>{resizeAnnotationCanvas();drawAnnotations()},50)}});
   const isHost=()=>role==='Host';
   const setRoomMeta=(title,status)=>{$('#roomTitle').textContent=title||'MNTchnology Meeting';$('#roomMeta').textContent=status||''};
   const identityFor=()=>`${isHost()?'host':'guest'}-${peerId}`;
@@ -220,6 +221,45 @@ document.addEventListener('DOMContentLoaded', () => {
     if(source===LK.Track.Source.ScreenShare){document.querySelector(`[data-peer-tile="${CSS.escape('screen:'+participant.identity)}"]`)?.remove();setScreenOwner(participant.identity,false)}
   }
 
+
+  function ensureShareFocusStyles(){
+    if(document.getElementById('mntShareFocusStyles'))return;
+    const s=document.createElement('style');
+    s.id='mntShareFocusStyles';
+    s.textContent=`
+      body.mnt-share-focus{overflow:hidden!important}
+      body.mnt-share-focus #videoGrid{
+        position:fixed!important;inset:0!important;z-index:640!important;
+        width:100vw!important;height:100vh!important;max-width:none!important;
+        margin:0!important;padding:0!important;background:#000!important;
+        display:block!important;
+      }
+      body.mnt-share-focus #videoGrid .tile{display:none!important}
+      body.mnt-share-focus #videoGrid .tile.main-tile{
+        display:block!important;position:absolute!important;inset:0!important;
+        width:100%!important;height:100%!important;max-width:none!important;
+        margin:0!important;border-radius:0!important;background:#000!important;
+      }
+      body.mnt-share-focus #videoGrid .tile.main-tile video{
+        width:100%!important;height:100%!important;object-fit:contain!important;background:#000!important;
+      }
+      body.mnt-share-focus #annotationCanvas{z-index:660!important}
+      body.mnt-share-focus #annotationToolbar{z-index:700!important}
+      body.mnt-share-focus #annotationFloatBtn{z-index:705!important}
+    `;
+    document.head.appendChild(s);
+  }
+  async function toggleSharedScreenFocus(){
+    const active=!!screenOwnerId&&selectedPeerId===screenOwnerId;
+    if(!active){alert('මුලින් Screen Share එක select කරන්න.');return}
+    ensureShareFocusStyles();
+    const on=!document.body.classList.contains('mnt-share-focus');
+    document.body.classList.toggle('mnt-share-focus',on);
+    if(on)requestAppFullscreen();
+    else await exitAppFullscreen();
+    setTimeout(()=>{resizeAnnotationCanvas();drawAnnotations()},80);
+  }
+
   function ensureAnnotationUI(){
     if($('#annotationToolbar'))return;
     const roomEl=$('#room .meeting-room');
@@ -232,6 +272,8 @@ document.addEventListener('DOMContentLoaded', () => {
     bar.innerHTML=`
       <button type="button" class="ann-tool active" id="annSelect" data-ann-tool="select" title="Mouse / Select"><span class="ann-icon">↖</span><small>Select</small></button>
       <button type="button" class="ann-tool" id="annPen" data-ann-tool="pen" title="Pencil"><span class="ann-icon">✎</span><small>Pen</small></button>
+      <button type="button" class="ann-tool" id="annOpenFile" title="Open image/PDF for annotation"><span class="ann-icon">▣</span><small>Open File</small></button>
+      <button type="button" class="ann-tool" id="annShareFull" title="Show shared screen full screen"><span class="ann-icon">⛶</span><small>Full Screen</small></button>
       <div class="ann-color-wrap">
         <button type="button" class="ann-tool" id="annColor" title="Pencil color"><span class="ann-color-dot" id="annColorDot"></span><small>Color</small></button>
         <div class="ann-color-palette" id="annColorPalette" aria-label="Annotation colors">
@@ -262,14 +304,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const c=document.createElement('canvas');
     c.id='annotationCanvas';
     c.style.pointerEvents='none';
-    c.style.position='absolute';
-    c.style.inset='0';
-    c.style.width='100%';
-    c.style.height='100%';
-    c.style.zIndex='80';
-    c.style.touchAction='none';
-    c.style.userSelect='none';
-    c.style.webkitUserSelect='none';
     roomEl.appendChild(c);
 
     const floatBtn=document.createElement('button');
@@ -313,13 +347,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }));
     $('#annColorDot')?.style.setProperty('background',annotationColor);
 
+    const annFileInput=document.createElement('input');
+    annFileInput.type='file';annFileInput.accept='image/*,application/pdf';annFileInput.style.display='none';roomEl.appendChild(annFileInput);
+    $('#annOpenFile')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();annFileInput.value='';annFileInput.click()});
+    $('#annShareFull')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();toggleSharedScreenFocus()});
+    annFileInput.addEventListener('change',()=>{const f=annFileInput.files?.[0];if(f)openAnnotationFileWindow(f)});
+
     $('#annUndo').onclick=()=>{if(!isHost()||!annotationStrokes.length)return;redoStrokes.push(annotationStrokes.pop());drawAnnotations();sendAnnotationState();syncPersistentAnnotationToolbar()};
     $('#annRedo').onclick=()=>{if(!isHost()||!redoStrokes.length)return;annotationStrokes.push(redoStrokes.pop());drawAnnotations();sendAnnotationState();syncPersistentAnnotationToolbar()};
     $('#annClose').onclick=()=>{annotationToolbarClosed=true;setTool('select');bar.classList.remove('visible');updateAnnotationFloatButton()};
 
     c.addEventListener('pointerdown',e=>{
       if(!isHost()||!annotationEnabled||!screenOwnerId)return;
-      e.preventDefault();e.stopPropagation();
       const p=pos(e);
       if(annotationTool==='text'){
         const value=window.prompt('Text එක type කරන්න:','');
@@ -332,13 +371,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     c.addEventListener('pointermove',e=>{
       if(!drawing||!current)return;
-      e.preventDefault();e.stopPropagation();
       const p=pos(e);
       if(current.type==='pen')current.points.push(p);else current.points[1]=p;
       drawAnnotations(current);
       const now=performance.now();if(now-lastBroadcast>45){lastBroadcast=now;sendAnnotationLive(current)}
     });
-    const end=e=>{if(!drawing||!current)return;e?.preventDefault?.();e?.stopPropagation?.();if(e?.pointerId!=null)try{c.releasePointerCapture?.(e.pointerId)}catch{};commit(current)};
+    const end=e=>{if(!drawing||!current)return;if(e?.pointerId!=null)try{c.releasePointerCapture?.(e.pointerId)}catch{};commit(current)};
     c.addEventListener('pointerup',end);c.addEventListener('pointercancel',end);c.addEventListener('pointerleave',e=>{if(drawing&&e.buttons===0)end(e)});
 
     // Zoom-style movable toolbar. Drag with Move button or dotted grip.
@@ -507,7 +545,7 @@ document.addEventListener('DOMContentLoaded', () => {
     annotationFileWindow=w;
     const isPdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name||'');
     const media=isPdf?`<embed src="${annotationFileUrl}" type="application/pdf">`:`<img src="${annotationFileUrl}" alt="${annotationFileName.replace(/[&<>\"]/g,'')}">`;
-    w.document.open();w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${annotationFileName.replace(/[&<>]/g,'')}</title><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111;font-family:Segoe UI,Arial,sans-serif}.wrap{position:fixed;inset:0;background:#111}.media{position:absolute;inset:0;display:grid;place-items:center}.media img,.media embed{width:100%;height:100%;object-fit:contain;border:0;background:#fff}.top{position:fixed;left:12px;top:12px;z-index:30;background:#071a36e8;color:#fff;padding:8px 12px;border-radius:9px;font-size:13px;pointer-events:none}.hint{position:fixed;right:12px;top:12px;z-index:30;background:#071a36e8;color:#fff;padding:8px 12px;border-radius:9px;font-size:12px;pointer-events:none}#mntFileAnnCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:20;touch-action:none;cursor:crosshair}</style></head><body><div class="wrap"><div class="media">${media}</div><canvas id="mntFileAnnCanvas"></canvas></div><div class="top">${annotationFileName.replace(/[&<>]/g,'')}</div><div class="hint">MNT Annotation • Share this window</div></body></html>`);w.document.close();
+    w.document.open();w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${annotationFileName.replace(/[&<>]/g,'')}</title><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111;font-family:Segoe UI,Arial,sans-serif}.wrap{position:fixed;inset:0;background:#111}.media{position:absolute;inset:0;display:grid;place-items:center}.media img,.media embed{width:100%;height:100%;object-fit:contain;border:0;background:#fff}.top{position:fixed;left:12px;top:12px;z-index:30;background:#071a36e8;color:#fff;padding:8px 12px;border-radius:9px;font-size:13px;pointer-events:none}.hint{position:fixed;right:12px;top:12px;z-index:30;background:#071a36e8;color:#fff;padding:8px 12px;border-radius:9px;font-size:12px;pointer-events:none}#mntFileAnnCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:20;touch-action:none;cursor:crosshair}</style></head><body><div class="wrap"><div class="media">${media}</div><canvas id="mntFileAnnCanvas"></canvas></div><div class="top">${annotationFileName.replace(/[&<>]/g,'')}</div><div class="hint">MNT Class File • Share this window (not the Meeting Room tab)</div></body></html>`);w.document.close();
     const setup=()=>{
       const c=w.document.getElementById('mntFileAnnCanvas');if(!c)return;
       let drawing=false,current=null,lastBroadcast=0;
@@ -532,10 +570,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateAnnotationLayer(){
     ensureAnnotationUI();const c=$('#annotationCanvas'),bar=$('#annotationToolbar');if(!c||!bar)return;
     const active=!!screenOwnerId&&selectedPeerId===screenOwnerId;const main=document.querySelector('#videoGrid .main-tile');
-    if(main){
-      if(getComputedStyle(main).position==='static')main.style.position='relative';
-      if(!main.contains(c))main.appendChild(c);
-    }
+    if(main&&!main.contains(c))main.appendChild(c);
     c.classList.toggle('visible',active);
     bar.classList.toggle('visible',active&&isHost()&&!annotationToolbarClosed);
     if(!active){annotationTool='select';annotationEnabled=false;c.style.pointerEvents='none';bar.querySelectorAll('[data-ann-tool]').forEach(b=>b.classList.toggle('active',b.dataset.annTool==='select'))}
@@ -677,7 +712,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try{if(meetingRecorder&&meetingRecorder.state!=='inactive')meetingRecorder.stop()}catch{}
     try{if(room){await room.disconnect()}}catch{}
     closePersistentAnnotationToolbar();
-    room=null;screenPublishing=false;participantFocus=false;activeCode='';screenOwnerId=null;annotationStrokes=[];redoStrokes=[];annotationTool='select';annotationEnabled=false;annotationToolbarClosed=false;selectedPeerId=null;$('#videoGrid').innerHTML='';
+    document.body.classList.remove('mnt-share-focus');room=null;screenPublishing=false;participantFocus=false;activeCode='';screenOwnerId=null;annotationStrokes=[];redoStrokes=[];annotationTool='select';annotationEnabled=false;annotationToolbarClosed=false;selectedPeerId=null;$('#videoGrid').innerHTML='';
     $('#room .meeting-room')?.classList.remove('mnt-guest-landscape-share');
     window.MNTMeetingUI?.closePanel?.();
     if(!silent){showPage('home');await exitAppFullscreen()}
@@ -686,7 +721,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(!room||screenPublishing)return;
     try{await room.localParticipant.setScreenShareEnabled(true,{audio:true,selfBrowserSurface:'exclude',surfaceSwitching:'include',systemAudio:'include'});setScreenOwner(identityFor(),true)}catch(e){console.warn('screen share',e)}
   }
-  async function stopScreen(){if(!room||!screenPublishing)return;try{await room.localParticipant.setScreenShareEnabled(false)}catch{}screenPublishing=false;closePersistentAnnotationToolbar()}
+  async function stopScreen(){document.body.classList.remove('mnt-share-focus');if(!room||!screenPublishing)return;try{await room.localParticipant.setScreenShareEnabled(false)}catch{}screenPublishing=false;closePersistentAnnotationToolbar()}
 
   const create=safeClone($('#createBtn'));if(create)create.addEventListener('click',async()=>{requestAppFullscreen();const n=($('#meetingName')?.value||'Team Meeting').trim()||'Team Meeting';const pw=$('#meetingPassword')?.value||'';const code=Math.random().toString(36).slice(2,8);localStorage.setItem('mnt_last_meeting',JSON.stringify({name:n,code,password:pw,createdAt:new Date().toISOString()}));$('#shareBox span').textContent=roomLink(code);await join(code,'Host',n,true)});
   const copy=safeClone($('#copyBtn'));if(copy)copy.addEventListener('click',async()=>{const t=$('#shareBox span').textContent;try{await navigator.clipboard.writeText(t);alert('Meeting link copied.')}catch{alert(t)}});

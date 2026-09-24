@@ -407,7 +407,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(!btn)return;
     const active=!!screenOwnerId&&isHost();
     const pipOpen=!!annotationPipWindow&&!annotationPipWindow.closed;
-    btn.classList.toggle('visible',active&&!pipOpen);
+    btn.classList.remove('visible');
   }
 
   function closePersistentAnnotationToolbar(){
@@ -572,11 +572,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const active=!!screenOwnerId&&selectedPeerId===screenOwnerId;const main=document.querySelector('#videoGrid .main-tile');
     if(main&&!main.contains(c))main.appendChild(c);
     c.classList.toggle('visible',active);
-    bar.classList.toggle('visible',active&&isHost()&&!annotationToolbarClosed);
+    bar.classList.remove('visible');
     if(!active){annotationTool='select';annotationEnabled=false;c.style.pointerEvents='none';bar.querySelectorAll('[data-ann-tool]').forEach(b=>b.classList.toggle('active',b.dataset.annTool==='select'))}
     updateAnnotationFloatButton();
     syncPersistentAnnotationToolbar();
-    if(active&&isHost()&&!annotationPipWindow&&navigator.userActivation?.isActive){openPersistentAnnotationToolbar().catch(()=>{})}
+    // Legacy browser annotation toolbar intentionally disabled; use MNT Screen Pencil.
     resizeAnnotationCanvas();
   }
   function getAnnotationContentRect(c){
@@ -752,12 +752,18 @@ document.addEventListener('DOMContentLoaded', () => {
   screenPencilBtn.addEventListener('click',e=>{
     e.preventDefault();e.stopPropagation();
     if(!isHost()){alert('Screen Pencil host සඳහා පමණයි.');return}
-    const a=document.createElement('a');
-    a.href='mntpencil://open';
-    a.style.display='none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(()=>a.remove(),500);
+
+    // Launch the Windows overlay without navigating/replacing the Meeting Room page.
+    // Do not touch LiveKit camera, microphone or screen-share state here.
+    let launcher=document.getElementById('mntScreenPencilLauncher');
+    if(!launcher){
+      launcher=document.createElement('iframe');
+      launcher.id='mntScreenPencilLauncher';
+      launcher.setAttribute('aria-hidden','true');
+      launcher.style.cssText='position:fixed;width:1px;height:1px;left:-9999px;top:-9999px;border:0;opacity:0;pointer-events:none';
+      document.body.appendChild(launcher);
+    }
+    launcher.src='mntpencil://open';
   });
 
   const switchCamBtn=document.createElement('button');
@@ -790,7 +796,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   mic?.addEventListener('click',async()=>{if(!room)return;const p=room.localParticipant;const pub=p.getTrackPublication(LK.Track.Source.Microphone);const enabled=!!pub&&!pub.isMuted;p.setMicrophoneEnabled(!enabled);mic.classList.toggle('active-control',!enabled);mic.querySelector('small').textContent=!enabled?'Mute':'Unmute'});
   cam?.addEventListener('click',async()=>{if(!room)return;const p=room.localParticipant;const pub=p.getTrackPublication(LK.Track.Source.Camera);const enabled=!!pub&&!pub.isMuted;p.setCameraEnabled(!enabled);cam.classList.toggle('active-control',!enabled);cam.querySelector('small').textContent=!enabled?'Stop Video':'Start Video'});
-  share?.addEventListener('click',async()=>{if(screenPublishing){await stopScreen()}else{await startScreen();updateAnnotationFloatButton();if(isHost()&&navigator.userActivation?.isActive&&!annotationPipWindow)openPersistentAnnotationToolbar().catch(()=>{})}});
+  share?.addEventListener('click',async()=>{if(screenPublishing){await stopScreen()}else{await startScreen()}});
 
   const moreBtn=[...$('#room .room-controls')?.querySelectorAll(':scope > button')||[]].find(b=>!b.classList.contains('leave')&&b.textContent.includes('More'));
   function formatRecordTime(ms){

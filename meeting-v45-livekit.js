@@ -199,3 +199,108 @@ document.addEventListener('DOMContentLoaded', () => {
   share?.addEventListener('click',async()=>{if(screenPublishing)await stopScreen();else await startScreen()});
   const urlCode=cleanCode(roomFromUrl());if(urlCode){const m=getMeetings().find(x=>x.code===urlCode),last=JSON.parse(localStorage.getItem('mnt_last_meeting')||'null');showPage('join');$('#joinCode').value=urlCode;$('#joinNote').textContent=m?`Meeting: ${m.name}`:(last?.code===urlCode?`Meeting: ${last.name}`:'Enter your name and join the meeting.')}
 });
+
+/* ================================================================
+   MNT TECHNOLOGY — reference interface shell
+   Keeps LiveKit behavior from the meeting core, but rearranges only
+   the room DOM so it matches the supplied Meeting Room design.
+   ================================================================ */
+document.addEventListener('DOMContentLoaded',()=>{
+  const roomPage=document.getElementById('room');
+  const meeting=roomPage?.querySelector('.meeting-room');
+  if(!roomPage||!meeting||meeting.dataset.referenceUi==='1') return;
+  meeting.dataset.referenceUi='1';
+  meeting.classList.add('mnt-reference-layout');
+
+  const top=meeting.querySelector('.room-top');
+  const grid=meeting.querySelector('#videoGrid');
+  const controls=meeting.querySelector('.room-controls');
+  const chat=meeting.querySelector('#chatPanel');
+  if(!top||!grid||!controls||!chat) return;
+
+  // Preserve the IDs used by the LiveKit core while rendering the supplied header.
+  top.innerHTML=`
+    <span id="roomTitle" class="mnt-hidden-meta">MNTchnology Meeting</span>
+    <span id="roomMeta" class="mnt-hidden-meta">Connecting…</span>
+    <div class="mnt-brand-cluster">
+      <div class="mnt-brand-logo">MN</div>
+      <div class="mnt-brand-copy">
+        <div class="mnt-brand-name"><span class="mn">MN</span>Technology</div>
+        <div class="mnt-brand-tag">Learn Technology</div>
+      </div>
+    </div>
+    <div class="mnt-title-cluster">
+      <div class="mnt-people-logo" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="currentColor"><circle cx="32" cy="18" r="9"/><circle cx="16" cy="23" r="7"/><circle cx="48" cy="23" r="7"/><path d="M18 50c0-11 6-18 14-18s14 7 14 18v2H18z"/><path d="M4 49c0-9 5-15 12-15 3 0 6 1 8 4-4 4-6 9-6 14H4zM60 49H46c0-5-2-10-6-14 2-2 5-4 8-4 7 0 12 6 12 15z"/></svg>
+      </div>
+      <div class="mnt-title-copy">
+        <div class="mnt-title-main">Meeting Room</div>
+        <div class="mnt-title-sub">Learn&nbsp;&nbsp;•&nbsp;&nbsp;Share&nbsp;&nbsp;•&nbsp;&nbsp;Grow</div>
+      </div>
+    </div>
+    <div class="mnt-room-actions">
+      <div class="mnt-timer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/></svg><span id="mntMeetingTimer">00:00:00</span></div>
+      <button type="button" class="mnt-reference-leave" id="mntReferenceLeave"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8V5H5v14h9v-3"/><path d="M10 12h10"/><path d="m17 9 3 3-3 3"/></svg><span>Leave Meeting</span></button>
+    </div>`;
+
+  let participants=meeting.querySelector('#participantsPanel');
+  if(!participants){
+    participants=document.createElement('aside');
+    participants.id='participantsPanel';
+    participants.className='chat-panel open';
+    participants.innerHTML='<div class="chat-head">Participants</div><div class="messages"><p><b>Participants</b></p></div>';
+  }else{
+    participants.classList.add('open');
+  }
+  chat.classList.add('open');
+
+  const body=document.createElement('div');
+  body.className='mnt-meeting-body';
+  const stage=document.createElement('div');
+  stage.className='mnt-stage-column';
+  const rail=document.createElement('div');
+  rail.className='mnt-right-rail';
+  top.insertAdjacentElement('afterend',body);
+  body.append(stage,rail);
+  stage.append(grid,controls);
+  rail.append(participants,chat);
+
+  // The desktop reference shows six bottom controls; keep the existing functional buttons.
+  const buttons=[...controls.querySelectorAll(':scope > button')];
+  const nonLeave=buttons.filter(b=>!b.classList.contains('leave') && b.id!=='switchCameraBtn');
+  const more=nonLeave.find(b=>b.textContent.includes('More')) || nonLeave[nonLeave.length-1];
+  if(more && !more.querySelector('small')) more.insertAdjacentHTML('beforeend','<small>More</small>');
+
+  const oldLeave=controls.querySelector('.leave');
+  document.getElementById('mntReferenceLeave')?.addEventListener('click',()=>oldLeave?.click());
+
+  // Meeting duration timer. It runs only while the room page is visible.
+  const timerEl=document.getElementById('mntMeetingTimer');
+  let startedAt=null,timerId=null;
+  const format=n=>String(n).padStart(2,'0');
+  const renderTimer=()=>{
+    if(!startedAt||!timerEl) return;
+    const seconds=Math.max(0,Math.floor((Date.now()-startedAt)/1000));
+    timerEl.textContent=`${format(Math.floor(seconds/3600))}:${format(Math.floor((seconds%3600)/60))}:${format(seconds%60)}`;
+  };
+  const syncRoomState=()=>{
+    const active=roomPage.classList.contains('active-page');
+    document.body.classList.toggle('mnt-in-room',active);
+    if(active){
+      if(!startedAt) startedAt=Date.now();
+      if(!timerId){renderTimer();timerId=setInterval(renderTimer,1000)}
+    }else if(timerId){clearInterval(timerId);timerId=null;startedAt=null;if(timerEl)timerEl.textContent='00:00:00'}
+  };
+  new MutationObserver(syncRoomState).observe(roomPage,{attributes:true,attributeFilter:['class']});
+  syncRoomState();
+
+  // On phones, Chat/Participants opens the same right rail as an overlay.
+  const chatBtn=document.getElementById('chatBtn');
+  const peopleBtn=document.getElementById('peopleBtn');
+  const toggleMobileRail=()=>{
+    if(matchMedia('(max-width:820px)').matches) meeting.classList.toggle('mnt-mobile-panel-open');
+  };
+  chatBtn?.addEventListener('click',toggleMobileRail);
+  peopleBtn?.addEventListener('click',toggleMobileRail);
+  rail.addEventListener('dblclick',()=>meeting.classList.remove('mnt-mobile-panel-open'));
+});

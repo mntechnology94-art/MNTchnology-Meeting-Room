@@ -20,7 +20,22 @@ document.addEventListener('DOMContentLoaded', () => {
   let peerId=sessionStorage.getItem('mnt_peer_id')||((crypto.randomUUID&&crypto.randomUUID())||Math.random().toString(36).slice(2));
   let selectedPeerId=null,screenOwnerId=null,annotationStrokes=[],redoStrokes=[],annotationEnabled=false;
   let currentCameraDeviceId=null,screenPublishing=false;
+  let participantFocus=false,suppressTileClickUntil=0,pipPosition=null;
+  let meetingRecorder=null,meetingRecordStream=null,meetingRecordChunks=[];
   sessionStorage.setItem('mnt_peer_id',peerId);
+
+  function requestAppFullscreen(){
+    const el=document.documentElement;
+    if(document.fullscreenElement||document.webkitFullscreenElement)return;
+    const fn=el.requestFullscreen||el.webkitRequestFullscreen;
+    if(fn){try{const p=fn.call(el);p?.catch?.(()=>{})}catch{}}
+  }
+  async function exitAppFullscreen(){
+    try{
+      if(document.fullscreenElement&&document.exitFullscreen)await document.exitFullscreen();
+      else if(document.webkitFullscreenElement&&document.webkitExitFullscreen)document.webkitExitFullscreen();
+    }catch{}
+  }
   const isHost=()=>role==='Host';
   const setRoomMeta=(title,status)=>{$('#roomTitle').textContent=title||'MNTchnology Meeting';$('#roomMeta').textContent=status||''};
   const identityFor=()=>`${isHost()?'host':'guest'}-${peerId}`;
@@ -30,23 +45,96 @@ document.addEventListener('DOMContentLoaded', () => {
   function tile(id,n){
     let t=document.querySelector(`[data-peer-tile="${CSS.escape(id)}"]`);if(t)return t;
     t=document.createElement('div');t.className='tile';t.dataset.peerTile=id;
-    t.addEventListener('click',()=>selectMainTile(id));
+    t.addEventListener('click',()=>{
+      if(performance.now()<suppressTileClickUntil)return;
+      requestAppFullscreen();
+      selectMainTile(id,true);
+    });
     t.innerHTML=`<div class="avatar">${esc((n||'G').trim().charAt(0).toUpperCase()||'G')}</div><span>🎙 ${esc(n||'Guest')}${id===peerId?' (You)':''}</span>`;
-    $('#videoGrid').appendChild(t);return t;
+    $('#videoGrid').appendChild(t);
+    if(id===peerId)enablePipDrag(t);
+    return t;
   }
-  function selectMainTile(id){
-    const grid=$('#videoGrid');
-    if(selectedPeerId===id){
-      selectedPeerId=null;
-      $$('#videoGrid .tile').forEach(x=>x.classList.remove('main-tile'));
-      grid?.classList.remove('focus-mode');
-      updateAnnotationLayer();
+
+  function enablePipDrag(t){
+    if(!t||t.dataset.pipDragBound==='1')return;
+    t.dataset.pipDragBound='1';
+    let dragging=false,moved=false,startX=0,startY=0,startLeft=0,startTop=0,pointerId=null;
+    t.addEventListener('pointerdown',e=>{
+      if(!t.classList.contains('self-pip'))return;
+      dragging=true;moved=false;pointerId=e.pointerId;
+      const grid=$('#videoGrid');const tr=t.getBoundingClientRect();const gr=grid.getBoundingClientRect();
+      startX=e.clientX;startY=e.clientY;startLeft=tr.left-gr.left;startTop=tr.top-gr.top;
+      try{t.setPointerCapture(pointerId)}catch{}
+      e.preventDefault();
+    });
+    t.addEventListener('pointermove',e=>{
+      if(!dragging||e.pointerId!==pointerId)return;
+      const grid=$('#videoGrid');const gr=grid.getBoundingClientRect();
+      const dx=e.clientX-startX,dy=e.clientY-startY;
+      if(Math.abs(dx)>4||Math.abs(dy)>4)moved=true;
+      const w=t.offsetWidth,h=t.offsetHeight;
+      const left=Math.max(6,Math.min(gr.width-w-6,startLeft+dx));
+      const top=Math.max(6,Math.min(gr.height-h-6,startTop+dy));
+      t.style.left=`${left}px`;t.style.top=`${top}px`;t.style.right='auto';t.style.bottom='auto';
+      pipPosition={left,top};
+      e.preventDefault();
+    });
+    const end=e=>{
+      if(!dragging)return;
+      dragging=false;
+      if(moved)suppressTileClickUntil=performance.now()+350;
+      try{t.releasePointerCapture(pointerId)}catch{}
+      pointerId=null;
+    };
+    t.addEventListener('pointerup',end);t.addEventListener('pointercancel',end);
+  }
+
+  function applyVideoLayout(){
+    const grid=$('#videoGrid');if(!grid)return;
+    const tiles=$$('#videoGrid .tile');
+    tiles.forEach(t=>{
+      t.classList.remove('main-tile','self-pip');
+      if(t.dataset.peerTile===peerId){
+        t.style.left='';t.style.top='';t.style.right='';t.style.bottom='';
+      }
+    });
+    let main=tiles.find(t=>t.dataset.peerTile===selectedPeerId);
+    if(!main){main=tiles.find(t=>t.dataset.peerTile===peerId)||tiles[0]||null;selectedPeerId=main?.dataset.peerTile||null}
+    if(main)main.classList.add('main-tile');
+    grid.classList.toggle('participant-focus-mode',participantFocus);
+    grid.classList.toggle('focus-mode',participantFocus);
+    if(participantFocus&&selectedPeerId!==peerId){
+      const self=tiles.find(t=>t.dataset.peerTile===peerId&&t.dataset.kind!=='screen');
+      if(self){
+        self.classList.add('self-pip');
+        enablePipDrag(self);
+        if(pipPosition){
+          self.style.left=`${pipPosition.left}px`;self.style.top=`${pipPosition.top}px`;self.style.right='auto';self.style.bottom='auto';
+        }
+      }
+    }
+    updateAnnotationLayer();
+  }
+
+  function setDefaultMain(id){
+    participantFocus=false;
+    selectedPeerId=id;
+    applyVideoLayout();
+  }
+
+  function selectMainTile(id,fromUser=false){
+    const exists=document.querySelector(`[data-peer-tile="${CSS.escape(id)}"]`);
+    if(!exists)return;
+    if(fromUser&&participantFocus&&selectedPeerId===id){
+      participantFocus=false;
+      selectedPeerId=id;
+      applyVideoLayout();
       return;
     }
     selectedPeerId=id;
-    $$('#videoGrid .tile').forEach(x=>x.classList.toggle('main-tile',x.dataset.peerTile===id));
-    grid?.classList.add('focus-mode');
-    updateAnnotationLayer();
+    participantFocus=!!fromUser || String(id).startsWith('screen:');
+    applyVideoLayout();
   }
   function setScreenOwner(id,active){
     const sid=`screen:${id}`;const t=document.querySelector(`[data-peer-tile="${CSS.escape(sid)}"]`);
@@ -61,12 +149,12 @@ document.addEventListener('DOMContentLoaded', () => {
       if(v&&v!==videoEl)try{v.remove()}catch{}
       v=videoEl;
       v.autoplay=true;v.playsInline=true;v.muted=muted;v.setAttribute('playsinline','');
-      v.style.display='block';v.style.width='100%';v.style.height='100%';v.style.objectFit='contain';v.style.background='#000';
+      v.style.display='block';v.style.width='100%';v.style.height='100%';v.style.objectFit=type==='screen'?'contain':'cover';v.style.background='#000';
       t.prepend(v);
     }else{
       if(!v){v=document.createElement('video');v.autoplay=true;v.playsInline=true;v.muted=muted;v.setAttribute('playsinline','');t.prepend(v)}
       if(videoEl?.srcObject)v.srcObject=videoEl.srcObject;
-      v.style.display='block';v.style.width='100%';v.style.height='100%';v.style.objectFit='contain';
+      v.style.display='block';v.style.width='100%';v.style.height='100%';v.style.objectFit=type==='screen'?'contain':'cover';
     }
     v.play?.().catch(()=>{});
     const a=t.querySelector('.avatar');if(a)a.style.display='none';
@@ -86,7 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const type=source===LK.Track.Source.ScreenShare?'screen':'camera';
     const el=track.attach();
     if(el.tagName==='AUDIO'){el.autoplay=true;el.setAttribute('data-peer-audio',id);el.style.display='none';document.body.appendChild(el);el.play?.().catch(()=>{})}
-    else {const t=tile(type==='screen'?`screen:${id}`:id,n);t.dataset.kind=type;let old=t.querySelector('video');if(old)old.remove();el.autoplay=true;el.playsInline=true;el.classList.add('lk-track-video');el.style.width='100%';el.style.height='100%';el.style.objectFit='contain';el.style.background='#000';t.prepend(el);el.play?.().catch(()=>{});if(type==='screen'){t.classList.add('screen-share-tile');setScreenOwner(id,true)}}
+    else {const t=tile(type==='screen'?`screen:${id}`:id,n);t.dataset.kind=type;let old=t.querySelector('video');if(old)old.remove();el.autoplay=true;el.playsInline=true;el.classList.add('lk-track-video');el.style.width='100%';el.style.height='100%';el.style.objectFit=type==='screen'?'contain':'cover';el.style.background='#000';t.prepend(el);el.play?.().catch(()=>{});if(type==='screen'){t.classList.add('screen-share-tile');setScreenOwner(id,true)}}
   }
   function detachTrack(track,participant,source){
     try{track.detach().forEach(e=>e.remove())}catch{}
@@ -118,8 +206,19 @@ document.addEventListener('DOMContentLoaded', () => {
   async function sendAnnotationState(){await publishData({kind:'annotation-state',strokes:annotationStrokes},true)}
   async function sendAnnotationLive(stroke){await publishData({kind:'annotation-live',strokes:annotationStrokes,live:stroke},false)}
 
-  function renderPeople(){const box=$('#participantsPanel .messages');if(!box)return;const arr=[{id:identityFor(),name,local:true},...(room?[...room.remoteParticipants.values()].map(p=>({id:p.identity,name:displayNameForParticipant(p)})):[])];box.innerHTML=`<p><b>Participants (${arr.length})</b></p>`+arr.map(x=>`<p>🎙 <b>${esc(x.name)}${x.local?' (You)':''}</b></p>`).join('')}
-  function ensureParticipantTiles(){if(room){tile(peerId,name);for(const p of room.remoteParticipants.values())tile(p.identity,displayNameForParticipant(p));}}
+  function renderPeople(){
+    const box=$('#participantsPanel .messages');if(!box)return;
+    const arr=[{id:peerId,name,local:true},...(room?[...room.remoteParticipants.values()].map(p=>({id:p.identity,name:displayNameForParticipant(p)})):[])];
+    box.innerHTML=`<p class="participant-count"><b>Participants (${arr.length})</b></p>`+
+      arr.map(x=>`<p class="participant-row" data-focus-peer="${esc(x.id)}">🎙 <b>${esc(x.name)}${x.local?' (You)':''}</b></p>`).join('');
+    box.querySelectorAll('[data-focus-peer]').forEach(row=>row.addEventListener('click',()=>{
+      const id=row.dataset.focusPeer;
+      requestAppFullscreen();
+      selectMainTile(id,true);
+      window.MNTMeetingUI?.closePanel?.();
+    }));
+  }
+  function ensureParticipantTiles(){if(room){tile(peerId,name);for(const p of room.remoteParticipants.values())tile(p.identity,displayNameForParticipant(p));}applyVideoLayout();}
 
   async function fetchToken(code){
     const identity=identityFor();
@@ -132,14 +231,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const code=cleanCode(rawCode);if(!code){alert('Meeting code or link enter කරන්න.');return}
     await leave(true);
     activeCode=code;activeTitle=title||'MNTchnology Meeting';name=(n||'Guest').trim().slice(0,40)||'Guest';role=asHost?'Host':'Guest';
-    selectedPeerId=peerId;screenOwnerId=null;annotationStrokes=[];redoStrokes=[];$('#videoGrid').innerHTML='';showPage('room');setRoomMeta(activeTitle,'Connecting to LiveKit…');ensureAnnotationUI();
+    participantFocus=false;pipPosition=null;selectedPeerId=peerId;screenOwnerId=null;annotationStrokes=[];redoStrokes=[];$('#videoGrid').innerHTML='';
+    window.dispatchEvent(new CustomEvent('mnt-role-changed',{detail:{role}}));
+    showPage('room');setRoomMeta(activeTitle,'Connecting to LiveKit…');ensureAnnotationUI();
     try{
       const creds=await fetchToken(code);
       room=new LK.Room({adaptiveStream:true,dynacast:true});
       room.on(LK.RoomEvent.TrackSubscribed,(track,publication,participant)=>{attachTrack(track,participant,publication.source);setRoomMeta(activeTitle,`● ${room.remoteParticipants.size+1} participant${room.remoteParticipants.size+1===1?'':'s'}`);renderPeople();updateAnnotationLayer()});
       room.on(LK.RoomEvent.TrackUnsubscribed,(track,publication,participant)=>{detachTrack(track,participant,publication.source);renderPeople();updateAnnotationLayer()});
-      room.on(LK.RoomEvent.ParticipantConnected,p=>{tile(p.identity,displayNameForParticipant(p));renderPeople();setRoomMeta(activeTitle,`● ${room.remoteParticipants.size+1} participants`)});
-      room.on(LK.RoomEvent.ParticipantDisconnected,p=>{document.querySelector(`[data-peer-tile="${CSS.escape(p.identity)}"]`)?.remove();document.querySelector(`[data-peer-tile="${CSS.escape('screen:'+p.identity)}"]`)?.remove();renderPeople();setRoomMeta(activeTitle,`● ${room.remoteParticipants.size+1} participant${room.remoteParticipants.size+1===1?'':'s'}`);updateAnnotationLayer()});
+      room.on(LK.RoomEvent.ParticipantConnected,p=>{tile(p.identity,displayNameForParticipant(p));renderPeople();applyVideoLayout();setRoomMeta(activeTitle,`● ${room.remoteParticipants.size+1} participants`)});
+      room.on(LK.RoomEvent.ParticipantDisconnected,p=>{
+        document.querySelector(`[data-peer-tile="${CSS.escape(p.identity)}"]`)?.remove();
+        document.querySelector(`[data-peer-tile="${CSS.escape('screen:'+p.identity)}"]`)?.remove();
+        if(selectedPeerId===p.identity||selectedPeerId===`screen:${p.identity}`){participantFocus=false;selectedPeerId=peerId}
+        renderPeople();applyVideoLayout();setRoomMeta(activeTitle,`● ${room.remoteParticipants.size+1} participant${room.remoteParticipants.size+1===1?'':'s'}`);updateAnnotationLayer()
+      });
       room.on(LK.RoomEvent.LocalTrackPublished,(publication)=>{
         const track=publication.track;
         if(publication.source===LK.Track.Source.Camera){
@@ -158,9 +264,10 @@ document.addEventListener('DOMContentLoaded', () => {
       room.on(LK.RoomEvent.Disconnected,()=>setRoomMeta(activeTitle,'Disconnected'));
       await room.connect(creds.server_url,creds.participant_token);
       ensureParticipantTiles();
-      selectMainTile(peerId);
+      setDefaultMain(peerId);
       await room.localParticipant.setCameraEnabled(true);
       renderLocalCamera();
+      setDefaultMain(peerId);
       await room.localParticipant.setMicrophoneEnabled(true);
       setRoomMeta(activeTitle,`● ${room.remoteParticipants.size+1} participant${room.remoteParticipants.size+1===1?'':'s'}`);
       renderPeople();
@@ -168,8 +275,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function leave(silent=false){
+    try{if(meetingRecorder&&meetingRecorder.state!=='inactive')meetingRecorder.stop()}catch{}
     try{if(room){await room.disconnect()}}catch{}
-    room=null;screenPublishing=false;activeCode='';screenOwnerId=null;annotationStrokes=[];redoStrokes=[];$('#videoGrid').innerHTML='';if(!silent)showPage('home')
+    room=null;screenPublishing=false;participantFocus=false;activeCode='';screenOwnerId=null;annotationStrokes=[];redoStrokes=[];selectedPeerId=null;$('#videoGrid').innerHTML='';
+    window.MNTMeetingUI?.closePanel?.();
+    if(!silent){showPage('home');await exitAppFullscreen()}
   }
   async function startScreen(){
     if(!room||screenPublishing)return;
@@ -177,26 +287,71 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   async function stopScreen(){if(!room||!screenPublishing)return;try{await room.localParticipant.setScreenShareEnabled(false)}catch{}screenPublishing=false}
 
-  const create=safeClone($('#createBtn'));if(create)create.addEventListener('click',async()=>{const n=($('#meetingName')?.value||'Team Meeting').trim()||'Team Meeting';const pw=$('#meetingPassword')?.value||'';const code=Math.random().toString(36).slice(2,8);localStorage.setItem('mnt_last_meeting',JSON.stringify({name:n,code,password:pw,createdAt:new Date().toISOString()}));$('#shareBox span').textContent=roomLink(code);await join(code,'Host',n,true)});
+  const create=safeClone($('#createBtn'));if(create)create.addEventListener('click',async()=>{requestAppFullscreen();const n=($('#meetingName')?.value||'Team Meeting').trim()||'Team Meeting';const pw=$('#meetingPassword')?.value||'';const code=Math.random().toString(36).slice(2,8);localStorage.setItem('mnt_last_meeting',JSON.stringify({name:n,code,password:pw,createdAt:new Date().toISOString()}));$('#shareBox span').textContent=roomLink(code);await join(code,'Host',n,true)});
   const copy=safeClone($('#copyBtn'));if(copy)copy.addEventListener('click',async()=>{const t=$('#shareBox span').textContent;try{await navigator.clipboard.writeText(t);alert('Meeting link copied.')}catch{alert(t)}});
-  const joinBtn=safeClone($('#joinMeetingBtn'));if(joinBtn)joinBtn.addEventListener('click',()=>join($('#joinCode')?.value,$('#joinName')?.value||'Guest'));
+  const joinBtn=safeClone($('#joinMeetingBtn'));if(joinBtn)joinBtn.addEventListener('click',()=>{requestAppFullscreen();join($('#joinCode')?.value,$('#joinName')?.value||'Guest')});
   const oldRoomJoin=$('#meetingsList [data-page="room"]');if(oldRoomJoin){const c=safeClone(oldRoomJoin);c.removeAttribute('data-page');c.addEventListener('click',()=>{const x=JSON.parse(localStorage.getItem('mnt_last_meeting')||'null');if(x)join(x.code,'Guest',x.name);else showPage('join')})}
   const sched=safeClone($('#scheduleBtn'));if(sched)sched.addEventListener('click',()=>{const n=($('#scheduleName')?.value||'Scheduled Meeting').trim()||'Scheduled Meeting',date=$('#scheduleDate')?.value,time=$('#scheduleTime')?.value,duration=$('#scheduleDuration')?.value||'60';if(!date||!time){alert('Date and time select කරන්න.');return}const code=Math.random().toString(36).slice(2,8),label=duration==='0'?'Unlimited':duration+' minutes',m={name:n,date,time,duration,durationLabel:label,code,password:$('#schedulePassword')?.value||'',link:roomLink(code),createdAt:new Date().toISOString()};const a=getMeetings();a.push(m);a.sort((x,y)=>(x.date+'T'+x.time).localeCompare(y.date+'T'+y.time));saveMeetings(a);renderSchedule();$('#scheduleResult').style.display='block';$('#scheduleResult').innerHTML=`✓ Meeting scheduled. Link: <span>${esc(m.link)}</span> <button id="copyScheduledLink">▣</button>`;$('#copyScheduledLink').onclick=async()=>{try{await navigator.clipboard.writeText(m.link);alert('Meeting link copied.')}catch{alert(m.link)}}});
-  function renderSchedule(){const box=$('#scheduledList');if(!box)return;const a=getMeetings();if(!a.length){box.innerHTML='<div class="form-note">No scheduled meetings yet.</div>';return}box.innerHTML='<h3>Upcoming Meetings</h3>'+a.map((m,i)=>{const code=m.code||cleanCode(m.link);const link=code?roomLink(code):(m.link||'');return `<div><b>${esc(m.name)}</b><span>${esc(m.date)} · ${esc(m.time)} · ${esc(m.durationLabel)}</span><button type="button" class="primary small" data-v45join="${i}">Join</button><button type="button" class="secondary small" data-v45copy="${i}">Copy Link</button></div>`}).join('');box.querySelectorAll('[data-v45join]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();const m=a[Number(b.dataset.v45join)];const code=m?.code||cleanCode(m?.link);if(!code){alert('Meeting code or link enter කරන්න.');return}join(code,'Host',m.name,true)}));box.querySelectorAll('[data-v45copy]').forEach(b=>b.addEventListener('click',async e=>{e.preventDefault();e.stopPropagation();const m=a[Number(b.dataset.v45copy)];const code=m?.code||cleanCode(m?.link);const link=code?roomLink(code):(m?.link||'');try{await navigator.clipboard.writeText(link);alert('Meeting link copied.')}catch{alert(link)}}))}
+  function renderSchedule(){const box=$('#scheduledList');if(!box)return;const a=getMeetings();if(!a.length){box.innerHTML='<div class="form-note">No scheduled meetings yet.</div>';return}box.innerHTML='<h3>Upcoming Meetings</h3>'+a.map((m,i)=>{const code=m.code||cleanCode(m.link);const link=code?roomLink(code):(m.link||'');return `<div><b>${esc(m.name)}</b><span>${esc(m.date)} · ${esc(m.time)} · ${esc(m.durationLabel)}</span><button type="button" class="primary small" data-v45join="${i}">Join</button><button type="button" class="secondary small" data-v45copy="${i}">Copy Link</button></div>`}).join('');box.querySelectorAll('[data-v45join]').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();const m=a[Number(b.dataset.v45join)];const code=m?.code||cleanCode(m?.link);if(!code){alert('Meeting code or link enter කරන්න.');return}requestAppFullscreen();join(code,'Host',m.name,true)}));box.querySelectorAll('[data-v45copy]').forEach(b=>b.addEventListener('click',async e=>{e.preventDefault();e.stopPropagation();const m=a[Number(b.dataset.v45copy)];const code=m?.code||cleanCode(m?.link);const link=code?roomLink(code):(m?.link||'');try{await navigator.clipboard.writeText(link);alert('Meeting link copied.')}catch{alert(link)}}))}
   renderSchedule();
   const leaveBtn=safeClone($('#room .leave'));if(leaveBtn){leaveBtn.removeAttribute('data-page');leaveBtn.addEventListener('click',()=>leave(false))}
-  const chatBtn=safeClone($('#chatBtn'));if(chatBtn)chatBtn.addEventListener('click',()=>$('#chatPanel')?.classList.add('open'));
-  const closeChat=safeClone($('#closeChat'));if(closeChat)closeChat.addEventListener('click',()=>$('#chatPanel')?.classList.remove('open'));
+  const chatBtn=safeClone($('#chatBtn'));if(chatBtn)chatBtn.addEventListener('click',()=>window.MNTMeetingUI?.togglePanel?.('chat'));
+  const closeChat=safeClone($('#closeChat'));if(closeChat)closeChat.addEventListener('click',()=>window.MNTMeetingUI?.closePanel?.());
   const chatAdd=(who,text,time)=>{const box=$('#chatPanel .messages');if(!box)return;const p=document.createElement('p');p.innerHTML=`<b>${esc(who)}</b> <small>${esc(time||'')}</small><br>${esc(text)}`;box.appendChild(p);box.scrollTop=box.scrollHeight};
   const chatSend=safeClone($('#chatPanel .chat-input button'));if(chatSend)chatSend.addEventListener('click',async()=>{const input=$('#chatPanel .chat-input input'),text=(input?.value||'').trim();if(!text)return;const time=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});chatAdd('You',text,time);input.value='';await publishData({kind:'chat',name,text,time},true)});
   const chatInput=$('#chatPanel .chat-input input');chatInput?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();chatSend?.click()}});
-  const peopleBtn=safeClone($('#peopleBtn'));if(peopleBtn)peopleBtn.addEventListener('click',()=>{let panel=$('#participantsPanel');if(!panel){panel=document.createElement('aside');panel.id='participantsPanel';panel.className='chat-panel open';panel.innerHTML='<div class="chat-head">Participants <button id="closeParticipants">×</button></div><div class="messages"></div>';$('#room .meeting-room').appendChild(panel);$('#closeParticipants').onclick=()=>panel.classList.remove('open')}else panel.classList.toggle('open');renderPeople()});
+  const peopleBtn=safeClone($('#peopleBtn'));if(peopleBtn)peopleBtn.addEventListener('click',()=>{window.MNTMeetingUI?.togglePanel?.('participants');renderPeople()});
   const controls=$$('#room .room-controls > button');const mic=controls[0],cam=controls[1],share=$('#room .share');
   const switchCamBtn=document.createElement('button');switchCamBtn.id='switchCameraBtn';switchCamBtn.innerHTML='🔄<small>Camera</small>';switchCamBtn.title='Switch camera';$('#room .room-controls')?.insertBefore(switchCamBtn,share);
   switchCamBtn.addEventListener('click',async()=>{if(!room)return;const cams=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');if(cams.length<2){alert('Only one camera is available on this device.');return}const idx=Math.max(0,cams.findIndex(d=>d.deviceId===currentCameraDeviceId));currentCameraDeviceId=cams[(idx+1)%cams.length].deviceId;try{await room.switchActiveDevice('videoinput',currentCameraDeviceId)}catch(e){console.warn('camera switch',e)}});
   mic?.addEventListener('click',async()=>{if(!room)return;const p=room.localParticipant;const pub=p.getTrackPublication(LK.Track.Source.Microphone);const enabled=!!pub&&!pub.isMuted;p.setMicrophoneEnabled(!enabled);mic.classList.toggle('active-control',!enabled);mic.querySelector('small').textContent=!enabled?'Mute':'Unmute'});
   cam?.addEventListener('click',async()=>{if(!room)return;const p=room.localParticipant;const pub=p.getTrackPublication(LK.Track.Source.Camera);const enabled=!!pub&&!pub.isMuted;p.setCameraEnabled(!enabled);cam.classList.toggle('active-control',!enabled);cam.querySelector('small').textContent=!enabled?'Stop Video':'Start Video'});
   share?.addEventListener('click',async()=>{if(screenPublishing)await stopScreen();else await startScreen()});
+
+  const moreBtn=[...$('#room .room-controls')?.querySelectorAll(':scope > button')||[]].find(b=>!b.classList.contains('leave')&&b.textContent.includes('More'));
+  function syncHostRecordControl(){
+    if(!moreBtn)return;
+    moreBtn.classList.toggle('mnt-record-control',isHost());
+    moreBtn.dataset.hostRecord=isHost()?'1':'0';
+    const small=moreBtn.querySelector('small');
+    if(small)small.textContent=isHost()?(meetingRecorder&&meetingRecorder.state!=='inactive'?'Stop Rec':'Record'):'More';
+  }
+  async function toggleMeetingRecording(){
+    if(!isHost())return;
+    if(meetingRecorder&&meetingRecorder.state!=='inactive'){meetingRecorder.stop();return}
+    if(!navigator.mediaDevices?.getDisplayMedia||!window.MediaRecorder){alert('මෙම browser එක meeting recording support කරන්නේ නැහැ.');return}
+    try{
+      meetingRecordStream=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:30},audio:true});
+      meetingRecordChunks=[];
+      const mimeTypes=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+      const mimeType=mimeTypes.find(x=>MediaRecorder.isTypeSupported?.(x))||'';
+      meetingRecorder=new MediaRecorder(meetingRecordStream,mimeType?{mimeType}:undefined);
+      meetingRecorder.ondataavailable=e=>{if(e.data?.size)meetingRecordChunks.push(e.data)};
+      meetingRecorder.onstop=()=>{
+        try{
+          const type=meetingRecorder?.mimeType||'video/webm';
+          const blob=new Blob(meetingRecordChunks,{type});
+          const a=document.createElement('a');
+          a.href=URL.createObjectURL(blob);
+          a.download=`MNTchnology-Meeting-${new Date().toISOString().replace(/[:.]/g,'-')}.webm`;
+          document.body.appendChild(a);a.click();a.remove();
+          setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+        }catch(e){console.warn('recording save',e)}
+        meetingRecordStream?.getTracks().forEach(t=>t.stop());
+        meetingRecordStream=null;meetingRecorder=null;meetingRecordChunks=[];
+        moreBtn?.classList.remove('mnt-recording');
+        syncHostRecordControl();
+      };
+      meetingRecordStream.getVideoTracks()[0]?.addEventListener('ended',()=>{if(meetingRecorder&&meetingRecorder.state!=='inactive')meetingRecorder.stop()});
+      meetingRecorder.start(1000);
+      moreBtn?.classList.add('mnt-recording');
+      syncHostRecordControl();
+    }catch(e){console.warn('recording',e)}
+  }
+  moreBtn?.addEventListener('click',()=>{if(isHost())toggleMeetingRecording()});
+  window.addEventListener('mnt-role-changed',syncHostRecordControl);
+  syncHostRecordControl();
+
   const urlCode=cleanCode(roomFromUrl());if(urlCode){const m=getMeetings().find(x=>x.code===urlCode),last=JSON.parse(localStorage.getItem('mnt_last_meeting')||'null');showPage('join');$('#joinCode').value=urlCode;$('#joinNote').textContent=m?`Meeting: ${m.name}`:(last?.code===urlCode?`Meeting: ${last.name}`:'Enter your name and join the meeting.')}
 });
 
@@ -250,9 +405,9 @@ document.addEventListener('DOMContentLoaded',()=>{
     participants.className='chat-panel open';
     participants.innerHTML='<div class="chat-head">Participants</div><div class="messages"><p><b>Participants</b></p></div>';
   }else{
-    participants.classList.add('open');
+    participants.classList.remove('open');
   }
-  chat.classList.add('open');
+  chat.classList.remove('open');
 
   const body=document.createElement('div');
   body.className='mnt-meeting-body';
@@ -294,13 +449,38 @@ document.addEventListener('DOMContentLoaded',()=>{
   new MutationObserver(syncRoomState).observe(roomPage,{attributes:true,attributeFilter:['class']});
   syncRoomState();
 
-  // On phones, Chat/Participants opens the same right rail as an overlay.
-  const chatBtn=document.getElementById('chatBtn');
-  const peopleBtn=document.getElementById('peopleBtn');
-  const toggleMobileRail=()=>{
-    if(matchMedia('(max-width:820px)').matches) meeting.classList.toggle('mnt-mobile-panel-open');
+  // Participants and Chat are closed by default. Only the selected panel opens.
+  let activePanel=null;
+  const ensureCloseButton=(panel)=>{
+    const head=panel?.querySelector('.chat-head');if(!head)return;
+    let btn=head.querySelector('button');
+    if(!btn){btn=document.createElement('button');btn.type='button';btn.textContent='×';head.appendChild(btn)}
+    btn.onclick=()=>window.MNTMeetingUI?.closePanel?.();
   };
-  chatBtn?.addEventListener('click',toggleMobileRail);
-  peopleBtn?.addEventListener('click',toggleMobileRail);
-  rail.addEventListener('dblclick',()=>meeting.classList.remove('mnt-mobile-panel-open'));
+  ensureCloseButton(participants);ensureCloseButton(chat);
+
+  const closePanel=()=>{
+    activePanel=null;
+    meeting.classList.remove('mnt-panel-open','mnt-mobile-panel-open');
+    rail.classList.remove('open');
+    participants.classList.remove('open');
+    chat.classList.remove('open');
+  };
+  const openPanel=(kind)=>{
+    activePanel=kind;
+    meeting.classList.add('mnt-panel-open');
+    if(matchMedia('(max-width:820px)').matches)meeting.classList.add('mnt-mobile-panel-open');
+    rail.classList.add('open');
+    participants.classList.toggle('open',kind==='participants');
+    chat.classList.toggle('open',kind==='chat');
+  };
+  const togglePanel=(kind)=>{
+    if(activePanel===kind&&meeting.classList.contains('mnt-panel-open'))closePanel();
+    else openPanel(kind);
+  };
+  window.MNTMeetingUI={...(window.MNTMeetingUI||{}),openPanel,closePanel,togglePanel};
+  closePanel();
+
+  // Escape closes panels and exits participant focus only through the existing tile toggle.
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&meeting.classList.contains('mnt-panel-open'))closePanel()});
 });

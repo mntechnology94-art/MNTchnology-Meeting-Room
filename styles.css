@@ -301,3 +301,226 @@ body.mnt-in-room .app-shell{min-height:100dvh;background:var(--mnt-bg)!important
   #room .mnt-reference-layout #chatPanel .messages p{font-size:12px!important;margin-left:28px!important;padding:8px 10px!important}
   #room .mnt-reference-layout .chat-input{height:48px;flex-basis:48px}.chat-input input{height:44px!important;font-size:13px!important}
 }
+
+
+/* ================================================================
+   V52 — Focus view + draggable self PiP + on-demand panels + recording
+   ================================================================ */
+
+/* Camera tiles show video only. Names remain available in Participants. */
+#room .mnt-reference-layout .video-grid .tile > span{
+  display:none!important;
+}
+
+/* Desktop: Participants/Chat rail is closed until the user clicks a control. */
+#room .mnt-reference-layout .mnt-meeting-body{
+  grid-template-columns:minmax(0,1fr)!important;
+}
+#room .mnt-reference-layout .mnt-right-rail{
+  display:none!important;
+}
+#room .mnt-reference-layout.mnt-panel-open .mnt-meeting-body{
+  grid-template-columns:minmax(0,1fr) 424px!important;
+}
+#room .mnt-reference-layout.mnt-panel-open .mnt-right-rail{
+  display:block!important;
+  min-width:0!important;
+  min-height:0!important;
+}
+#room .mnt-reference-layout .mnt-right-rail .chat-panel{
+  display:none!important;
+  width:100%!important;
+  height:100%!important;
+}
+#room .mnt-reference-layout .mnt-right-rail .chat-panel.open{
+  display:flex!important;
+}
+#room .mnt-reference-layout .chat-head{
+  justify-content:space-between!important;
+}
+#room .mnt-reference-layout .chat-head button{
+  display:grid!important;
+  place-items:center!important;
+  margin-left:auto!important;
+  width:36px!important;
+  height:36px!important;
+  border:0!important;
+  border-radius:50%!important;
+  background:#0d2e54!important;
+  color:#fff!important;
+  font-size:24px!important;
+  line-height:1!important;
+  cursor:pointer!important;
+}
+
+/* Participant rows can be used to choose the main camera. */
+#room .mnt-reference-layout #participantsPanel .participant-row{
+  cursor:pointer!important;
+  border-radius:10px!important;
+  transition:background .15s ease!important;
+}
+#room .mnt-reference-layout #participantsPanel .participant-row:hover{
+  background:rgba(31,126,215,.14)!important;
+}
+
+/* Full in-app participant focus. */
+#room .mnt-reference-layout .video-grid.participant-focus-mode{
+  display:block!important;
+  position:relative!important;
+  width:100%!important;
+  height:100%!important;
+  padding:0!important;
+  overflow:hidden!important;
+}
+#room .mnt-reference-layout .video-grid.participant-focus-mode .tile:not(.main-tile):not(.self-pip){
+  display:none!important;
+}
+#room .mnt-reference-layout .video-grid.participant-focus-mode .tile.main-tile{
+  display:block!important;
+  position:absolute!important;
+  inset:0!important;
+  width:100%!important;
+  height:100%!important;
+  min-width:0!important;
+  min-height:0!important;
+  max-width:none!important;
+  max-height:none!important;
+  margin:0!important;
+  border-radius:10px!important;
+  z-index:1!important;
+  flex:none!important;
+}
+#room .mnt-reference-layout .video-grid.participant-focus-mode .tile.main-tile video{
+  position:absolute!important;
+  inset:0!important;
+  width:100%!important;
+  height:100%!important;
+  object-fit:cover!important;
+}
+#room .mnt-reference-layout .video-grid.participant-focus-mode .tile.main-tile[data-kind="screen"] video,
+#room .mnt-reference-layout .video-grid.participant-focus-mode .tile.main-tile.screen-share-tile video{
+  object-fit:contain!important;
+}
+
+/* Local self-view floats above the selected participant and can be dragged. */
+#room .mnt-reference-layout .video-grid .tile.self-pip{
+  display:block!important;
+  position:absolute!important;
+  width:230px!important;
+  height:130px!important;
+  min-width:0!important;
+  min-height:0!important;
+  max-width:36%!important;
+  max-height:34%!important;
+  right:16px;
+  bottom:16px;
+  left:auto;
+  top:auto;
+  z-index:90!important;
+  border:2px solid rgba(255,255,255,.9)!important;
+  border-radius:12px!important;
+  box-shadow:0 12px 35px rgba(0,0,0,.45)!important;
+  cursor:grab!important;
+  touch-action:none!important;
+  user-select:none!important;
+  flex:none!important;
+}
+#room .mnt-reference-layout .video-grid .tile.self-pip:active{
+  cursor:grabbing!important;
+}
+#room .mnt-reference-layout .video-grid .tile.self-pip video{
+  position:absolute!important;
+  inset:0!important;
+  width:100%!important;
+  height:100%!important;
+  object-fit:cover!important;
+  border-radius:10px!important;
+}
+
+/* Host recording uses the existing sixth control position instead of crowding the bar. */
+#room .mnt-reference-layout .room-controls > button.mnt-record-control::before{
+  content:"●"!important;
+  color:#ff445a!important;
+  font-size:32px!important;
+  letter-spacing:0!important;
+}
+#room .mnt-reference-layout .room-controls > button.mnt-record-control.mnt-recording::before{
+  content:"■"!important;
+  color:#ff445a!important;
+  animation:mntRecordPulse 1.2s ease-in-out infinite;
+}
+@keyframes mntRecordPulse{
+  0%,100%{opacity:1}
+  50%{opacity:.45}
+}
+
+/* Keep the stage large when a side panel is closed. */
+#room .mnt-reference-layout:not(.mnt-panel-open) .mnt-stage-column{
+  width:100%!important;
+}
+
+/* Mobile/tablet: panel becomes a single overlay and PiP becomes compact. */
+@media (max-width:820px){
+  html:fullscreen,
+  body:fullscreen,
+  html:-webkit-full-screen,
+  body:-webkit-full-screen{
+    background:#020b1b!important;
+  }
+
+  body.mnt-in-room{
+    overflow:hidden!important;
+    overscroll-behavior:none!important;
+  }
+
+  #room .mnt-reference-layout.mnt-panel-open .mnt-meeting-body{
+    display:block!important;
+  }
+  #room .mnt-reference-layout .mnt-right-rail{
+    display:none!important;
+    position:absolute!important;
+    inset:7px!important;
+    z-index:350!important;
+    background:#03132b!important;
+    border-radius:12px!important;
+    padding:0!important;
+  }
+  #room .mnt-reference-layout.mnt-mobile-panel-open .mnt-right-rail{
+    display:block!important;
+  }
+  #room .mnt-reference-layout .mnt-right-rail .chat-panel.open{
+    display:flex!important;
+    position:absolute!important;
+    inset:0!important;
+    width:100%!important;
+    height:100%!important;
+    border-radius:12px!important;
+  }
+
+  #room .mnt-reference-layout .video-grid.participant-focus-mode .tile.self-pip{
+    width:120px!important;
+    height:78px!important;
+    max-width:40vw!important;
+    max-height:22vh!important;
+    right:9px;
+    bottom:9px;
+    border-radius:9px!important;
+  }
+  #room .mnt-reference-layout .video-grid.participant-focus-mode .tile.self-pip video{
+    border-radius:7px!important;
+  }
+
+  /* In focus mode the selected camera uses all available stage height. */
+  #room .mnt-reference-layout .video-grid.participant-focus-mode .tile.main-tile{
+    height:100%!important;
+    min-height:0!important;
+  }
+}
+
+/* Narrow phones */
+@media (max-width:520px){
+  #room .mnt-reference-layout .video-grid.participant-focus-mode .tile.self-pip{
+    width:105px!important;
+    height:68px!important;
+  }
+}

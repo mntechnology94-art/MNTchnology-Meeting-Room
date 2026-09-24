@@ -404,6 +404,7 @@ document.addEventListener('DOMContentLoaded', () => {
     d.body.innerHTML=`<div class="pip-wrap"><div class="pip-bar">
       <button class="pip-tool active" data-pip-tool="select" title="Mouse / Select"><span class="ico">↖</span><small>Select</small></button>
       <button class="pip-tool" data-pip-tool="pen" title="Pencil"><span class="ico">✎</span><small>Pen</small></button>
+      <button class="pip-tool" id="pipAnnOpenFile" title="Open image/PDF"><span class="ico">▣</span><small>Open File</small></button>
       <div class="color-wrap"><button class="pip-tool" id="pipAnnColor" title="Pencil color"><span class="dot" id="pipAnnColorDot"></span><small>Color</small></button><div class="palette" id="pipAnnPalette">
         <button data-pip-color="#ff2f2f" style="--sw:#ff2f2f"></button><button data-pip-color="#ff9f1c" style="--sw:#ff9f1c"></button><button data-pip-color="#ffd60a" style="--sw:#ffd60a"></button><button data-pip-color="#25d366" style="--sw:#25d366"></button>
         <button data-pip-color="#20b7ff" style="--sw:#20b7ff"></button><button data-pip-color="#7b61ff" style="--sw:#7b61ff"></button><button data-pip-color="#ffffff" style="--sw:#ffffff"></button><button data-pip-color="#111111" style="--sw:#111111"></button>
@@ -677,6 +678,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   async function startScreen(){
     if(!room||screenPublishing)return;
+    if(annotationFileWindow&&!annotationFileWindow.closed){
+      try{annotationFileWindow.focus()}catch{}
+      alert('Share Screen window එකෙන් MNTClassFile window එක select කරන්න. Meeting Room tab/window එක select කරන්න එපා.');
+    }
     try{await room.localParticipant.setScreenShareEnabled(true,{audio:true,selfBrowserSurface:'exclude',surfaceSwitching:'include',systemAudio:'include'});setScreenOwner(identityFor(),true)}catch(e){console.warn('screen share',e)}
   }
   async function stopScreen(){if(!room||!screenPublishing)return;try{await room.localParticipant.setScreenShareEnabled(false)}catch{}screenPublishing=false;closePersistentAnnotationToolbar()}

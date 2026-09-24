@@ -853,3 +853,8 @@ body.mnt-in-room .app-shell{min-height:100dvh;background:var(--mnt-bg)!important
   #room .mnt-reference-layout #annotationFloatBtn span{font-size:19px!important}
   #room .mnt-reference-layout #annotationFloatBtn small{font-size:10px!important}
 }
+
+/* V59 — MNT Screen Pencil desktop launcher */
+#room .mnt-reference-layout .room-controls>#screenPencilBtn::before{content:"✎"!important;color:#ffd54a!important;font-size:31px!important;font-weight:800!important;letter-spacing:0!important}
+#room .mnt-reference-layout .room-controls>#screenPencilBtn.active-control::before{outline:2px solid #ffd54a!important;outline-offset:2px!important}
+@media(max-width:820px){#room .mnt-reference-layout .room-controls>#screenPencilBtn::before{font-size:22px!important}}

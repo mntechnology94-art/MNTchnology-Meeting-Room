@@ -738,6 +738,28 @@ document.addEventListener('DOMContentLoaded', () => {
   const chatInput=$('#chatPanel .chat-input input');chatInput?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();chatSend?.click()}});
   const peopleBtn=safeClone($('#peopleBtn'));if(peopleBtn)peopleBtn.addEventListener('click',()=>{window.MNTMeetingUI?.togglePanel?.('participants');renderPeople()});
   const controls=$$('#room .room-controls > button');const mic=controls[0],cam=controls[1],share=$('#room .share');
+
+  // MNT Screen Pencil desktop overlay launcher (Windows).
+  // The desktop app registers the mntpencil:// protocol. This keeps the
+  // existing LiveKit screen-share and browser annotation code untouched.
+  const screenPencilBtn=document.createElement('button');
+  screenPencilBtn.id='screenPencilBtn';
+  screenPencilBtn.type='button';
+  screenPencilBtn.title='Open MNT Screen Pencil desktop overlay';
+  screenPencilBtn.setAttribute('aria-label','Open MNT Screen Pencil');
+  screenPencilBtn.innerHTML='<small>Pencil</small>';
+  if(share) share.insertAdjacentElement('afterend',screenPencilBtn);
+  screenPencilBtn.addEventListener('click',e=>{
+    e.preventDefault();e.stopPropagation();
+    if(!isHost()){alert('Screen Pencil host සඳහා පමණයි.');return}
+    const a=document.createElement('a');
+    a.href='mntpencil://open';
+    a.style.display='none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>a.remove(),500);
+  });
+
   const switchCamBtn=document.createElement('button');
   switchCamBtn.id='switchCameraBtn';
   switchCamBtn.innerHTML='<small>Switch Cam</small>';

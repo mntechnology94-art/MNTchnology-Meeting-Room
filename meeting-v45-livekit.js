@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentCameraDeviceId=null,screenPublishing=false;
   let participantFocus=false,suppressTileClickUntil=0,pipPosition=null;
   let meetingRecorder=null,meetingRecordStream=null,meetingRecordChunks=[];
+  let meetingRecordCanvas=null,meetingRecordCanvasStream=null,meetingRecordRaf=0,meetingRecordAudioCtx=null,meetingRecordAudioDest=null,meetingRecordAudioSources=[];
   sessionStorage.setItem('mnt_peer_id',peerId);
 
   function requestAppFullscreen(){
@@ -366,40 +367,135 @@ document.addEventListener('DOMContentLoaded', () => {
     moreBtn.dataset.hostRecord=isHost()?'1':'0';
     const small=moreBtn.querySelector('small');
     if(small)small.textContent=isHost()?(meetingRecorder&&meetingRecorder.state!=='inactive'?'Stop Rec':'Record'):'More';
+    let badge=document.getElementById('mntRecordingBadge');
+    if(isHost()&&meetingRecorder&&meetingRecorder.state!=='inactive'){
+      if(!badge){badge=document.createElement('div');badge.id='mntRecordingBadge';badge.textContent='● REC';$('#room .meeting-room')?.appendChild(badge)}
+      badge.classList.add('show');
+    }else badge?.remove();
+  }
+  function drawVideoFit(ctx,video,x,y,w,h,fit='cover'){
+    const vw=video?.videoWidth||0,vh=video?.videoHeight||0;
+    if(!vw||!vh||video.readyState<2){ctx.fillStyle='#071329';ctx.fillRect(x,y,w,h);return}
+    const sr=vw/vh,dr=w/h;
+    let sx=0,sy=0,sw=vw,sh=vh,dx=x,dy=y,dw=w,dh=h;
+    if(fit==='contain'){
+      if(sr>dr){dh=w/sr;dy=y+(h-dh)/2}else{dw=h*sr;dx=x+(w-dw)/2}
+    }else{
+      if(sr>dr){sw=vh*dr;sx=(vw-sw)/2}else{sh=vw/dr;sy=(vh-sh)/2}
+    }
+    try{ctx.drawImage(video,sx,sy,sw,sh,dx,dy,dw,dh)}catch{ctx.fillStyle='#071329';ctx.fillRect(x,y,w,h)}
+  }
+  async function buildMeetingRecordingStream(){
+    const grid=$('#videoGrid');
+    if(!grid)throw new Error('Meeting video area not found');
+    if(!window.MediaRecorder)throw new Error('MediaRecorder not supported');
+    const captureSupported=!!HTMLCanvasElement.prototype.captureStream;
+    if(!captureSupported){
+      if(navigator.mediaDevices?.getDisplayMedia)return navigator.mediaDevices.getDisplayMedia({video:true,audio:true});
+      throw new Error('Recording is not supported in this browser');
+    }
+    const gr=grid.getBoundingClientRect();
+    const aspect=(gr.width>10&&gr.height>10)?gr.width/gr.height:16/9;
+    const maxW=1280,maxH=720;
+    let cw=maxW,ch=Math.round(maxW/aspect);
+    if(ch>maxH){ch=maxH;cw=Math.round(maxH*aspect)}
+    cw=Math.max(360,cw);ch=Math.max(240,ch);
+    const canvas=document.createElement('canvas');canvas.width=cw;canvas.height=ch;meetingRecordCanvas=canvas;
+    const ctx=canvas.getContext('2d',{alpha:false});
+    const draw=()=>{
+      if(!meetingRecordCanvas)return;
+      const currentGrid=$('#videoGrid');
+      const r=currentGrid?.getBoundingClientRect();
+      ctx.fillStyle='#020b1d';ctx.fillRect(0,0,cw,ch);
+      if(currentGrid&&r&&r.width>0&&r.height>0){
+        const scaleX=cw/r.width,scaleY=ch/r.height;
+        [...currentGrid.querySelectorAll('.tile')].forEach(t=>{
+          const cs=getComputedStyle(t);if(cs.display==='none'||cs.visibility==='hidden'||t.offsetWidth===0||t.offsetHeight===0)return;
+          const tr=t.getBoundingClientRect();
+          const x=(tr.left-r.left)*scaleX,y=(tr.top-r.top)*scaleY,w=tr.width*scaleX,h=tr.height*scaleY;
+          ctx.fillStyle='#071329';ctx.fillRect(x,y,w,h);
+          const v=t.querySelector('video');
+          if(v)drawVideoFit(ctx,v,x,y,w,h,t.dataset.kind==='screen'?'contain':'cover');
+          ctx.strokeStyle='#173052';ctx.lineWidth=2;ctx.strokeRect(x,y,w,h);
+        });
+      }
+      meetingRecordRaf=requestAnimationFrame(draw);
+    };
+    draw();
+    meetingRecordCanvasStream=canvas.captureStream(30);
+    const output=new MediaStream();
+    meetingRecordCanvasStream.getVideoTracks().forEach(t=>output.addTrack(t));
+
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(AC&&room){
+      try{
+        meetingRecordAudioCtx=new AC();
+        await meetingRecordAudioCtx.resume?.();
+        meetingRecordAudioDest=meetingRecordAudioCtx.createMediaStreamDestination();
+        const seen=new Set();
+        const addAudioTrack=(mst)=>{
+          if(!mst||mst.kind!=='audio'||seen.has(mst.id))return;
+          seen.add(mst.id);
+          try{
+            const src=meetingRecordAudioCtx.createMediaStreamSource(new MediaStream([mst]));
+            src.connect(meetingRecordAudioDest);meetingRecordAudioSources.push(src);
+          }catch(e){console.warn('record audio source',e)}
+        };
+        const collectParticipant=(p)=>{
+          const pubs=p?.trackPublications?[...p.trackPublications.values()]:[];
+          pubs.forEach(pub=>addAudioTrack(pub?.track?.mediaStreamTrack));
+        };
+        collectParticipant(room.localParticipant);
+        for(const p of room.remoteParticipants.values())collectParticipant(p);
+        meetingRecordAudioDest.stream.getAudioTracks().forEach(t=>output.addTrack(t));
+      }catch(e){console.warn('record audio mix',e)}
+    }
+    return output;
+  }
+  function cleanupMeetingRecording(){
+    if(meetingRecordRaf){cancelAnimationFrame(meetingRecordRaf);meetingRecordRaf=0}
+    meetingRecordCanvasStream?.getTracks().forEach(t=>t.stop());
+    meetingRecordCanvasStream=null;meetingRecordCanvas=null;
+    meetingRecordAudioSources.forEach(s=>{try{s.disconnect()}catch{}});meetingRecordAudioSources=[];
+    try{meetingRecordAudioDest?.stream?.getTracks()?.forEach(t=>t.stop())}catch{}
+    meetingRecordAudioDest=null;
+    try{meetingRecordAudioCtx?.close?.()}catch{}meetingRecordAudioCtx=null;
+    meetingRecordStream?.getTracks().forEach(t=>t.stop());meetingRecordStream=null;
   }
   async function toggleMeetingRecording(){
     if(!isHost())return;
     if(meetingRecorder&&meetingRecorder.state!=='inactive'){meetingRecorder.stop();return}
-    if(!navigator.mediaDevices?.getDisplayMedia||!window.MediaRecorder){alert('මෙම browser එක meeting recording support කරන්නේ නැහැ.');return}
     try{
-      meetingRecordStream=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:30},audio:true});
       meetingRecordChunks=[];
-      const mimeTypes=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+      meetingRecordStream=await buildMeetingRecordingStream();
+      const mimeTypes=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm;codecs=vp8','video/webm'];
       const mimeType=mimeTypes.find(x=>MediaRecorder.isTypeSupported?.(x))||'';
-      meetingRecorder=new MediaRecorder(meetingRecordStream,mimeType?{mimeType}:undefined);
+      meetingRecorder=new MediaRecorder(meetingRecordStream,mimeType?{mimeType,videoBitsPerSecond:3500000}:undefined);
       meetingRecorder.ondataavailable=e=>{if(e.data?.size)meetingRecordChunks.push(e.data)};
+      meetingRecorder.onerror=e=>{console.warn('recording error',e);alert('Recording error එකක් ආවා. Browser permissions/check කරන්න.')};
       meetingRecorder.onstop=()=>{
+        const recorder=meetingRecorder;
+        const chunks=[...meetingRecordChunks];
         try{
-          const type=meetingRecorder?.mimeType||'video/webm';
-          const blob=new Blob(meetingRecordChunks,{type});
-          const a=document.createElement('a');
-          a.href=URL.createObjectURL(blob);
-          a.download=`MNTchnology-Meeting-${new Date().toISOString().replace(/[:.]/g,'-')}.webm`;
-          document.body.appendChild(a);a.click();a.remove();
-          setTimeout(()=>URL.revokeObjectURL(a.href),1500);
-        }catch(e){console.warn('recording save',e)}
-        meetingRecordStream?.getTracks().forEach(t=>t.stop());
-        meetingRecordStream=null;meetingRecorder=null;meetingRecordChunks=[];
-        moreBtn?.classList.remove('mnt-recording');
-        syncHostRecordControl();
+          if(chunks.length){
+            const type=recorder?.mimeType||'video/webm';
+            const blob=new Blob(chunks,{type});
+            const url=URL.createObjectURL(blob);
+            const a=document.createElement('a');a.href=url;a.download=`MNTchnology-Meeting-${new Date().toISOString().replace(/[:.]/g,'-')}.webm`;
+            document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
+          }else alert('Recording data save වුණේ නැහැ. නැවත try කරන්න.');
+        }catch(e){console.warn('recording save',e);alert('Recording save කරන්න බැරි වුණා.')}
+        cleanupMeetingRecording();meetingRecorder=null;meetingRecordChunks=[];
+        moreBtn?.classList.remove('mnt-recording');syncHostRecordControl();
       };
-      meetingRecordStream.getVideoTracks()[0]?.addEventListener('ended',()=>{if(meetingRecorder&&meetingRecorder.state!=='inactive')meetingRecorder.stop()});
       meetingRecorder.start(1000);
-      moreBtn?.classList.add('mnt-recording');
-      syncHostRecordControl();
-    }catch(e){console.warn('recording',e)}
+      moreBtn?.classList.add('mnt-recording');syncHostRecordControl();
+    }catch(e){
+      console.warn('recording',e);cleanupMeetingRecording();meetingRecorder=null;meetingRecordChunks=[];moreBtn?.classList.remove('mnt-recording');syncHostRecordControl();
+      alert(`Recording start කරන්න බැරි වුණා. ${e?.message||'Browser permission/support check කරන්න.'}`);
+    }
   }
-  moreBtn?.addEventListener('click',()=>{if(isHost())toggleMeetingRecording()});
+  moreBtn?.addEventListener('click',e=>{if(isHost()){e.preventDefault();e.stopPropagation();toggleMeetingRecording()}});
   window.addEventListener('mnt-role-changed',syncHostRecordControl);
   syncHostRecordControl();
 

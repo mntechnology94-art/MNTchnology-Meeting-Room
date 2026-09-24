@@ -721,3 +721,101 @@ body.mnt-in-room .app-shell{min-height:100dvh;background:var(--mnt-bg)!important
   #room #mntRecordingDockStatus{min-width:78px;font-size:10px}
   #room #mntRecordingDock button{padding:7px 8px;font-size:10px}
 }
+
+
+/* ================================================================
+   V56 — Zoom-style screen-share annotation toolbar
+   Additive only: existing V55 meeting, recording, camera, PiP, chat,
+   participants and landscape behavior are unchanged.
+   ================================================================ */
+#room .mnt-reference-layout #annotationToolbar{
+  position:fixed!important;
+  left:50%!important;
+  right:auto!important;
+  top:78px!important;
+  transform:translateX(-50%);
+  z-index:700!important;
+  display:none!important;
+  align-items:stretch!important;
+  gap:2px!important;
+  max-width:calc(100vw - 16px)!important;
+  min-height:70px!important;
+  padding:7px 8px!important;
+  border:1px solid rgba(255,255,255,.2)!important;
+  border-radius:16px!important;
+  background:rgba(11,14,19,.97)!important;
+  box-shadow:0 15px 45px rgba(0,0,0,.55)!important;
+  backdrop-filter:blur(14px)!important;
+  overflow:visible!important;
+  user-select:none!important;
+  touch-action:none!important;
+}
+#room .mnt-reference-layout #annotationToolbar.visible{display:flex!important}
+#room .mnt-reference-layout #annotationToolbar.dragging{cursor:grabbing!important;transform:none!important}
+#room .mnt-reference-layout #annotationToolbar[style*="left:"]{transform:none}
+#room .mnt-reference-layout #annotationToolbar .ann-tool{
+  width:62px!important;
+  min-width:62px!important;
+  height:58px!important;
+  padding:4px 5px!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:3px!important;
+  border:0!important;
+  border-radius:9px!important;
+  background:transparent!important;
+  color:#f7f9ff!important;
+  font-family:Inter,"Segoe UI",Arial,sans-serif!important;
+  cursor:pointer!important;
+}
+#room .mnt-reference-layout #annotationToolbar .ann-tool:hover{background:#1b222c!important}
+#room .mnt-reference-layout #annotationToolbar .ann-tool.active{background:#0867d8!important;box-shadow:inset 0 0 0 1px #238cff!important}
+#room .mnt-reference-layout #annotationToolbar .ann-icon{font-size:27px!important;line-height:28px!important;font-weight:400!important;color:#fff!important}
+#room .mnt-reference-layout #annotationToolbar .ann-tool small{font-size:11px!important;line-height:12px!important;font-weight:700!important;color:#fff!important;white-space:nowrap!important}
+#room .mnt-reference-layout #annotationToolbar .ann-separator{width:1px!important;min-width:1px!important;height:48px!important;margin:5px 4px!important;background:rgba(255,255,255,.15)!important}
+#room .mnt-reference-layout #annotationToolbar .ann-color-wrap{position:relative!important;display:flex!important;align-items:stretch!important}
+#room .mnt-reference-layout #annotationToolbar .ann-color-dot{width:25px!important;height:25px!important;border:2px solid #fff!important;border-radius:50%!important;box-shadow:0 0 0 1px #0008!important}
+#room .mnt-reference-layout #annotationToolbar .ann-color-palette{
+  position:absolute!important;
+  top:66px!important;
+  left:50%!important;
+  transform:translateX(-50%)!important;
+  display:none!important;
+  grid-template-columns:repeat(4,32px)!important;
+  gap:7px!important;
+  padding:9px!important;
+  border:1px solid rgba(255,255,255,.16)!important;
+  border-radius:12px!important;
+  background:#111820!important;
+  box-shadow:0 12px 30px #0008!important;
+}
+#room .mnt-reference-layout #annotationToolbar .ann-color-palette.open{display:grid!important}
+#room .mnt-reference-layout #annotationToolbar .ann-color-palette button{
+  width:32px!important;height:32px!important;border-radius:50%!important;border:2px solid #dfe7f4!important;background:var(--sw)!important;cursor:pointer!important;padding:0!important;
+}
+#room .mnt-reference-layout #annotationToolbar .ann-color-palette button:hover{transform:scale(1.12)}
+#room .mnt-reference-layout #annotationToolbar .ann-move{cursor:grab!important}
+#room .mnt-reference-layout #annotationToolbar .ann-drag-grip{
+  width:22px!important;min-width:22px!important;display:grid!important;place-items:center!important;color:#9aa5b3!important;font-size:27px!important;line-height:1!important;cursor:grab!important;touch-action:none!important;
+}
+#room .mnt-reference-layout #annotationToolbar .ann-close .ann-icon{
+  width:32px!important;height:32px!important;display:grid!important;place-items:center!important;border-radius:50%!important;background:#f02f45!important;font-size:29px!important;line-height:28px!important;
+}
+#room .mnt-reference-layout #annotationToolbar .ann-close:hover{background:transparent!important}
+#room .mnt-reference-layout #annotationCanvas.visible{z-index:31!important}
+
+@media(max-width:980px){
+  #room .mnt-reference-layout #annotationToolbar{
+    left:8px!important;right:8px!important;top:66px!important;transform:none!important;
+    max-width:calc(100vw - 16px)!important;overflow-x:auto!important;overflow-y:visible!important;justify-content:flex-start!important;
+    scrollbar-width:none!important;
+  }
+  #room .mnt-reference-layout #annotationToolbar::-webkit-scrollbar{display:none!important}
+  #room .mnt-reference-layout #annotationToolbar .ann-tool{width:52px!important;min-width:52px!important;height:54px!important}
+  #room .mnt-reference-layout #annotationToolbar .ann-icon{font-size:23px!important;line-height:24px!important}
+  #room .mnt-reference-layout #annotationToolbar .ann-tool small{font-size:9px!important}
+  #room .mnt-reference-layout #annotationToolbar .ann-separator{height:44px!important;margin:5px 2px!important}
+  #room .mnt-reference-layout #annotationToolbar .ann-color-palette{position:fixed!important;top:128px!important;left:70px!important;transform:none!important}
+}

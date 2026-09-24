@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let activeCode='',room=null,name='Guest',activeTitle='MNTchnology Meeting',role='Guest';
   let peerId=sessionStorage.getItem('mnt_peer_id')||((crypto.randomUUID&&crypto.randomUUID())||Math.random().toString(36).slice(2));
   let selectedPeerId=null,screenOwnerId=null,annotationStrokes=[],redoStrokes=[],annotationEnabled=false;
+  let annotationTool='select',annotationColor='#ff2f2f',annotationToolbarClosed=false,annotationToolbarPosition=null;
   let currentCameraDeviceId=null,screenPublishing=false;
   let participantFocus=false,suppressTileClickUntil=0,pipPosition=null;
   let meetingRecorder=null,meetingRecordStream=null,meetingRecordChunks=[];
@@ -164,8 +165,17 @@ document.addEventListener('DOMContentLoaded', () => {
   function setScreenOwner(id,active){
     const sid=`screen:${id}`;const t=document.querySelector(`[data-peer-tile="${CSS.escape(sid)}"]`);
     if(t)t.classList.toggle('screen-share-tile',!!active);
-    if(active){screenOwnerId=sid;selectMainTile(sid)}
-    else if(screenOwnerId===sid){screenOwnerId=null;const fallback=[...document.querySelectorAll('#videoGrid .tile')].find(x=>x.dataset.peerTile===id)||document.querySelector('#videoGrid .tile');if(fallback)selectMainTile(fallback.dataset.peerTile)}
+    if(active){
+      screenOwnerId=sid;
+      annotationToolbarClosed=false;
+      selectMainTile(sid);
+    }
+    else if(screenOwnerId===sid){
+      screenOwnerId=null;
+      annotationTool='select';annotationEnabled=false;annotationToolbarClosed=false;
+      const fallback=[...document.querySelectorAll('#videoGrid .tile')].find(x=>x.dataset.peerTile===id)||document.querySelector('#videoGrid .tile');
+      if(fallback)selectMainTile(fallback.dataset.peerTile);
+    }
     requestAnimationFrame(syncGuestLandscapeShareMode);
   }
   function putVideo(id,videoEl,n,type='camera',muted=false){
@@ -210,24 +220,179 @@ document.addEventListener('DOMContentLoaded', () => {
   function ensureAnnotationUI(){
     if($('#annotationToolbar'))return;
     const roomEl=$('#room .meeting-room');
-    const bar=document.createElement('div');bar.id='annotationToolbar';bar.innerHTML='<button id="annPen" title="Pencil">✏️</button><button id="annUndo" title="Undo">↩️</button><button id="annRedo" title="Redo">↪️</button><button id="annClose" title="Close">×</button>';roomEl.appendChild(bar);
-    const c=document.createElement('canvas');c.id='annotationCanvas';c.style.pointerEvents='none';roomEl.appendChild(c);
-    let drawing=false,stroke=null,lastBroadcast=0;
-    const pos=e=>{const r=c.getBoundingClientRect();return{x:Math.max(0,Math.min(1,(e.clientX-r.left)/Math.max(1,r.width))),y:Math.max(0,Math.min(1,(e.clientY-r.top)/Math.max(1,r.height)))}};
+    if(!roomEl)return;
+
+    const bar=document.createElement('div');
+    bar.id='annotationToolbar';
+    bar.setAttribute('role','toolbar');
+    bar.setAttribute('aria-label','Screen annotation tools');
+    bar.innerHTML=`
+      <button type="button" class="ann-tool active" id="annSelect" data-ann-tool="select" title="Mouse / Select"><span class="ann-icon">↖</span><small>Select</small></button>
+      <button type="button" class="ann-tool" id="annPen" data-ann-tool="pen" title="Pencil"><span class="ann-icon">✎</span><small>Pen</small></button>
+      <div class="ann-color-wrap">
+        <button type="button" class="ann-tool" id="annColor" title="Pencil color"><span class="ann-color-dot" id="annColorDot"></span><small>Color</small></button>
+        <div class="ann-color-palette" id="annColorPalette" aria-label="Annotation colors">
+          <button type="button" data-ann-color="#ff2f2f" style="--sw:#ff2f2f" title="Red"></button>
+          <button type="button" data-ann-color="#ff9f1c" style="--sw:#ff9f1c" title="Orange"></button>
+          <button type="button" data-ann-color="#ffd60a" style="--sw:#ffd60a" title="Yellow"></button>
+          <button type="button" data-ann-color="#25d366" style="--sw:#25d366" title="Green"></button>
+          <button type="button" data-ann-color="#20b7ff" style="--sw:#20b7ff" title="Blue"></button>
+          <button type="button" data-ann-color="#7b61ff" style="--sw:#7b61ff" title="Purple"></button>
+          <button type="button" data-ann-color="#ffffff" style="--sw:#ffffff" title="White"></button>
+          <button type="button" data-ann-color="#111111" style="--sw:#111111" title="Black"></button>
+        </div>
+      </div>
+      <button type="button" class="ann-tool" data-ann-tool="line" title="Line"><span class="ann-icon">╱</span><small>Line</small></button>
+      <button type="button" class="ann-tool" data-ann-tool="arrow" title="Arrow"><span class="ann-icon">→</span><small>Arrow</small></button>
+      <button type="button" class="ann-tool" data-ann-tool="rect" title="Rectangle"><span class="ann-icon">□</span><small>Rectangle</small></button>
+      <button type="button" class="ann-tool" data-ann-tool="circle" title="Circle"><span class="ann-icon">○</span><small>Circle</small></button>
+      <button type="button" class="ann-tool" data-ann-tool="text" title="Text"><span class="ann-icon">T</span><small>Text</small></button>
+      <span class="ann-separator"></span>
+      <button type="button" class="ann-tool ann-action" id="annUndo" title="Undo"><span class="ann-icon">↶</span><small>Undo</small></button>
+      <button type="button" class="ann-tool ann-action" id="annRedo" title="Redo"><span class="ann-icon">↷</span><small>Redo</small></button>
+      <span class="ann-separator"></span>
+      <button type="button" class="ann-tool ann-move" id="annMove" title="Move toolbar"><span class="ann-icon">✥</span><small>Move</small></button>
+      <span class="ann-drag-grip" id="annDragGrip" title="Drag toolbar" aria-label="Drag toolbar">⠿</span>
+      <button type="button" class="ann-tool ann-close" id="annClose" title="Close annotations"><span class="ann-icon">×</span><small>Close</small></button>`;
+    roomEl.appendChild(bar);
+
+    const c=document.createElement('canvas');
+    c.id='annotationCanvas';
+    c.style.pointerEvents='none';
+    roomEl.appendChild(c);
+
+    let drawing=false,current=null,lastBroadcast=0;
+    const pos=e=>{
+      const r=c.getBoundingClientRect();
+      return{x:Math.max(0,Math.min(1,(e.clientX-r.left)/Math.max(1,r.width))),y:Math.max(0,Math.min(1,(e.clientY-r.top)/Math.max(1,r.height)))};
+    };
     const sync=()=>{const main=document.querySelector('#videoGrid .main-tile');if(main&&!main.contains(c))main.appendChild(c);resizeAnnotationCanvas()};
-    $('#annPen').onclick=()=>{annotationEnabled=!annotationEnabled;bar.classList.toggle('active',annotationEnabled);c.style.pointerEvents=annotationEnabled?'auto':'none';sync()};
+
+    function setTool(tool){
+      annotationTool=tool;
+      annotationEnabled=tool!=='select';
+      bar.querySelectorAll('[data-ann-tool]').forEach(b=>b.classList.toggle('active',b.dataset.annTool===tool));
+      c.style.pointerEvents=annotationEnabled?'auto':'none';
+      c.style.cursor=tool==='text'?'text':annotationEnabled?'crosshair':'default';
+      $('#annColorPalette')?.classList.remove('open');
+      sync();
+    }
+    function commit(obj){
+      if(!obj)return;
+      annotationStrokes.push(obj);redoStrokes=[];current=null;drawing=false;drawAnnotations();sendAnnotationState();
+    }
+    function makeShape(tool,a,b){return{type:tool,color:annotationColor,points:[a,b]}};
+
+    bar.querySelectorAll('[data-ann-tool]').forEach(btn=>btn.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();setTool(btn.dataset.annTool)}));
+    $('#annColor')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();$('#annColorPalette')?.classList.toggle('open')});
+    $('#annColorPalette')?.querySelectorAll('[data-ann-color]').forEach(btn=>btn.addEventListener('click',e=>{
+      e.preventDefault();e.stopPropagation();annotationColor=btn.dataset.annColor||'#ff2f2f';
+      $('#annColorDot')?.style.setProperty('background',annotationColor);$('#annColorPalette')?.classList.remove('open');
+    }));
+    $('#annColorDot')?.style.setProperty('background',annotationColor);
+
     $('#annUndo').onclick=()=>{if(!isHost()||!annotationStrokes.length)return;redoStrokes.push(annotationStrokes.pop());drawAnnotations();sendAnnotationState()};
     $('#annRedo').onclick=()=>{if(!isHost()||!redoStrokes.length)return;annotationStrokes.push(redoStrokes.pop());drawAnnotations();sendAnnotationState()};
-    $('#annClose').onclick=()=>{annotationEnabled=false;bar.classList.remove('active');c.style.pointerEvents='none'};
-    c.addEventListener('pointerdown',e=>{if(!isHost()||!annotationEnabled||!screenOwnerId)return;drawing=true;stroke=[pos(e)];c.setPointerCapture(e.pointerId);drawAnnotations(stroke);sendAnnotationLive(stroke)});
-    c.addEventListener('pointermove',e=>{if(!drawing||!stroke)return;stroke.push(pos(e));drawAnnotations(stroke);const now=performance.now();if(now-lastBroadcast>45){lastBroadcast=now;sendAnnotationLive(stroke)}});
-    const end=()=>{if(!drawing||!stroke)return;drawing=false;annotationStrokes.push(stroke);redoStrokes=[];stroke=null;drawAnnotations();sendAnnotationState()};
-    c.addEventListener('pointerup',end);c.addEventListener('pointercancel',end);c.addEventListener('pointerleave',e=>{if(drawing&&e.buttons===0)end()});
-    window.addEventListener('resize',resizeAnnotationCanvas);
+    $('#annClose').onclick=()=>{annotationToolbarClosed=true;setTool('select');bar.classList.remove('visible')};
+
+    c.addEventListener('pointerdown',e=>{
+      if(!isHost()||!annotationEnabled||!screenOwnerId)return;
+      const p=pos(e);
+      if(annotationTool==='text'){
+        const value=window.prompt('Text එක type කරන්න:','');
+        if(value&&value.trim())commit({type:'text',color:annotationColor,point:p,text:value.trim().slice(0,160)});
+        return;
+      }
+      drawing=true;c.setPointerCapture?.(e.pointerId);
+      current=annotationTool==='pen'?{type:'pen',color:annotationColor,points:[p]}:makeShape(annotationTool,p,p);
+      drawAnnotations(current);sendAnnotationLive(current);
+    });
+    c.addEventListener('pointermove',e=>{
+      if(!drawing||!current)return;
+      const p=pos(e);
+      if(current.type==='pen')current.points.push(p);else current.points[1]=p;
+      drawAnnotations(current);
+      const now=performance.now();if(now-lastBroadcast>45){lastBroadcast=now;sendAnnotationLive(current)}
+    });
+    const end=e=>{if(!drawing||!current)return;if(e?.pointerId!=null)try{c.releasePointerCapture?.(e.pointerId)}catch{};commit(current)};
+    c.addEventListener('pointerup',end);c.addEventListener('pointercancel',end);c.addEventListener('pointerleave',e=>{if(drawing&&e.buttons===0)end(e)});
+
+    // Zoom-style movable toolbar. Drag with Move button or dotted grip.
+    const dragStart=e=>{
+      if(!isHost())return;
+      e.preventDefault();e.stopPropagation();
+      const r=bar.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,startLeft=r.left,startTop=r.top;
+      bar.style.setProperty('left',`${startLeft}px`,'important');bar.style.setProperty('top',`${startTop}px`,'important');bar.style.setProperty('right','auto','important');bar.style.setProperty('transform','none','important');
+      bar.classList.add('dragging');
+      const move=ev=>{
+        const maxLeft=Math.max(6,window.innerWidth-bar.offsetWidth-6),maxTop=Math.max(6,window.innerHeight-bar.offsetHeight-6);
+        const left=Math.min(maxLeft,Math.max(6,startLeft+ev.clientX-sx));
+        const top=Math.min(maxTop,Math.max(6,startTop+ev.clientY-sy));
+        annotationToolbarPosition={left,top};bar.style.setProperty('left',`${left}px`,'important');bar.style.setProperty('top',`${top}px`,'important');bar.style.setProperty('right','auto','important');bar.style.setProperty('transform','none','important');
+      };
+      const up=()=>{bar.classList.remove('dragging');window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};
+      window.addEventListener('pointermove',move);window.addEventListener('pointerup',up,{once:true});
+    };
+    $('#annMove')?.addEventListener('pointerdown',dragStart);$('#annDragGrip')?.addEventListener('pointerdown',dragStart);
+
+    window.addEventListener('pointerdown',e=>{if(!bar.contains(e.target))$('#annColorPalette')?.classList.remove('open')});
+    window.addEventListener('resize',()=>{resizeAnnotationCanvas();if(annotationToolbarPosition){const maxLeft=Math.max(6,window.innerWidth-bar.offsetWidth-6),maxTop=Math.max(6,window.innerHeight-bar.offsetHeight-6);annotationToolbarPosition.left=Math.min(maxLeft,annotationToolbarPosition.left);annotationToolbarPosition.top=Math.min(maxTop,annotationToolbarPosition.top);bar.style.setProperty('left',`${annotationToolbarPosition.left}px`,'important');bar.style.setProperty('top',`${annotationToolbarPosition.top}px`,'important');bar.style.setProperty('transform','none','important')}});
   }
-  function resizeAnnotationCanvas(){const c=$('#annotationCanvas');if(!c)return;const main=document.querySelector('#videoGrid .main-tile');if(!main)return;const r=main.getBoundingClientRect();c.width=Math.max(1,Math.round(r.width));c.height=Math.max(1,Math.round(r.height));drawAnnotations()}
-  function updateAnnotationLayer(){ensureAnnotationUI();const c=$('#annotationCanvas'),bar=$('#annotationToolbar');if(!c||!bar)return;const active=!!screenOwnerId&&selectedPeerId===screenOwnerId;const main=document.querySelector('#videoGrid .main-tile');if(main&&!main.contains(c))main.appendChild(c);c.classList.toggle('visible',active);bar.classList.toggle('visible',active&&isHost());if(!active){annotationEnabled=false;bar.classList.remove('active');c.style.pointerEvents='none'}resizeAnnotationCanvas()}
-  function drawAnnotations(extra){const c=$('#annotationCanvas');if(!c)return;const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);ctx.strokeStyle='#ff2f2f';ctx.lineWidth=Math.max(3,Math.round(Math.min(c.width,c.height)/220));ctx.lineCap='round';const all=extra?[...annotationStrokes,extra]:annotationStrokes;for(const s of all){if(!s?.length)continue;ctx.beginPath();ctx.moveTo(s[0].x*c.width,s[0].y*c.height);for(let i=1;i<s.length;i++)ctx.lineTo(s[i].x*c.width,s[i].y*c.height);ctx.stroke()}}
+
+  function resizeAnnotationCanvas(){
+    const c=$('#annotationCanvas');if(!c)return;const main=document.querySelector('#videoGrid .main-tile');if(!main)return;
+    const r=main.getBoundingClientRect(),dpr=Math.min(2,window.devicePixelRatio||1);
+    const cssW=Math.max(1,Math.round(r.width)),cssH=Math.max(1,Math.round(r.height));
+    c.style.width=`${cssW}px`;c.style.height=`${cssH}px`;c.width=Math.max(1,Math.round(cssW*dpr));c.height=Math.max(1,Math.round(cssH*dpr));
+    drawAnnotations();
+  }
+  function updateAnnotationLayer(){
+    ensureAnnotationUI();const c=$('#annotationCanvas'),bar=$('#annotationToolbar');if(!c||!bar)return;
+    const active=!!screenOwnerId&&selectedPeerId===screenOwnerId;const main=document.querySelector('#videoGrid .main-tile');
+    if(main&&!main.contains(c))main.appendChild(c);
+    c.classList.toggle('visible',active);
+    bar.classList.toggle('visible',active&&isHost()&&!annotationToolbarClosed);
+    if(!active){annotationTool='select';annotationEnabled=false;c.style.pointerEvents='none';bar.querySelectorAll('[data-ann-tool]').forEach(b=>b.classList.toggle('active',b.dataset.annTool==='select'))}
+    resizeAnnotationCanvas();
+  }
+  function drawAnnotations(extra){
+    const c=$('#annotationCanvas');if(!c)return;const ctx=c.getContext('2d');if(!ctx)return;
+    const dpr=Math.min(2,window.devicePixelRatio||1),w=c.width,h=c.height,cssW=w/dpr,cssH=h/dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,cssW,cssH);ctx.lineCap='round';ctx.lineJoin='round';
+    const all=extra?[...annotationStrokes,extra]:annotationStrokes;
+    const xy=p=>({x:(p?.x||0)*cssW,y:(p?.y||0)*cssH});
+    const baseWidth=Math.max(2.5,Math.min(cssW,cssH)/220);
+    const drawOne=item=>{
+      if(!item)return;
+      // Backward compatibility with the old pencil-array format.
+      if(Array.isArray(item))item={type:'pen',color:'#ff2f2f',points:item};
+      const type=item.type||'pen',color=item.color||'#ff2f2f';ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=baseWidth;
+      if(type==='text'){
+        const p=xy(item.point||item.points?.[0]);ctx.font=`700 ${Math.max(16,Math.round(Math.min(cssW,cssH)*.045))}px Inter,Segoe UI,Arial`;ctx.textBaseline='top';ctx.fillText(String(item.text||''),p.x,p.y);return;
+      }
+      const pts=Array.isArray(item.points)?item.points:[];if(!pts.length)return;
+      if(type==='pen'){
+        ctx.beginPath();const a=xy(pts[0]);ctx.moveTo(a.x,a.y);for(let i=1;i<pts.length;i++){const p=xy(pts[i]);ctx.lineTo(p.x,p.y)}ctx.stroke();return;
+      }
+      const a=xy(pts[0]),b=xy(pts[1]||pts[0]);
+      if(type==='line'||type==='arrow'){
+        ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+        if(type==='arrow'){
+          const ang=Math.atan2(b.y-a.y,b.x-a.x),len=Math.max(12,Math.min(28,Math.hypot(b.x-a.x,b.y-a.y)*.16));
+          ctx.beginPath();ctx.moveTo(b.x,b.y);ctx.lineTo(b.x-len*Math.cos(ang-Math.PI/6),b.y-len*Math.sin(ang-Math.PI/6));ctx.moveTo(b.x,b.y);ctx.lineTo(b.x-len*Math.cos(ang+Math.PI/6),b.y-len*Math.sin(ang+Math.PI/6));ctx.stroke();
+        }
+        return;
+      }
+      if(type==='rect'){ctx.strokeRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(b.x-a.x),Math.abs(b.y-a.y));return}
+      if(type==='circle'){
+        const cx=(a.x+b.x)/2,cy=(a.y+b.y)/2,rx=Math.abs(b.x-a.x)/2,ry=Math.abs(b.y-a.y)/2;ctx.beginPath();ctx.ellipse(cx,cy,Math.max(.5,rx),Math.max(.5,ry),0,0,Math.PI*2);ctx.stroke();return;
+      }
+    };
+    all.forEach(drawOne);
+  }
+  async function sendAnnotationState(){await publishData({kind:'annotation-state',strokes:annotationStrokes},true)}
+  async function sendAnnotationLive(stroke){await publishData({kind:'annotation-live',strokes:annotationStrokes,live:stroke},false)}
+
   async function publishData(obj,reliable=true){if(!room)return;try{const bytes=new TextEncoder().encode(JSON.stringify(obj));await room.localParticipant.publishData(bytes,{reliable})}catch(e){console.warn('LiveKit data',e)}}
   async function sendAnnotationState(){await publishData({kind:'annotation-state',strokes:annotationStrokes},true)}
   async function sendAnnotationLive(stroke){await publishData({kind:'annotation-live',strokes:annotationStrokes,live:stroke},false)}
@@ -257,7 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const code=cleanCode(rawCode);if(!code){alert('Meeting code or link enter කරන්න.');return}
     await leave(true);
     activeCode=code;activeTitle=title||'MNTchnology Meeting';name=(n||'Guest').trim().slice(0,40)||'Guest';role=asHost?'Host':'Guest';
-    participantFocus=false;pipPosition=null;selectedPeerId=peerId;screenOwnerId=null;annotationStrokes=[];redoStrokes=[];$('#videoGrid').innerHTML='';
+    participantFocus=false;pipPosition=null;selectedPeerId=peerId;screenOwnerId=null;annotationStrokes=[];redoStrokes=[];annotationTool='select';annotationEnabled=false;annotationToolbarClosed=false;$('#videoGrid').innerHTML='';
     window.dispatchEvent(new CustomEvent('mnt-role-changed',{detail:{role}}));
     showPage('room');setRoomMeta(activeTitle,'Connecting to LiveKit…');ensureAnnotationUI();
     try{
@@ -305,7 +470,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function leave(silent=false){
     try{if(meetingRecorder&&meetingRecorder.state!=='inactive')meetingRecorder.stop()}catch{}
     try{if(room){await room.disconnect()}}catch{}
-    room=null;screenPublishing=false;participantFocus=false;activeCode='';screenOwnerId=null;annotationStrokes=[];redoStrokes=[];selectedPeerId=null;$('#videoGrid').innerHTML='';
+    room=null;screenPublishing=false;participantFocus=false;activeCode='';screenOwnerId=null;annotationStrokes=[];redoStrokes=[];annotationTool='select';annotationEnabled=false;annotationToolbarClosed=false;selectedPeerId=null;$('#videoGrid').innerHTML='';
     $('#room .meeting-room')?.classList.remove('mnt-guest-landscape-share');
     window.MNTMeetingUI?.closePanel?.();
     if(!silent){showPage('home');await exitAppFullscreen()}

@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let peerId=sessionStorage.getItem('mnt_peer_id')||((crypto.randomUUID&&crypto.randomUUID())||Math.random().toString(36).slice(2));
   let selectedPeerId=null,screenOwnerId=null,annotationStrokes=[],redoStrokes=[],annotationEnabled=false;
   let annotationTool='select',annotationColor='#ff2f2f',annotationToolbarClosed=false,annotationToolbarPosition=null;
+  let annotationPipWindow=null,annotationPipOpening=false,annotationPipMinimized=false;
   let currentCameraDeviceId=null,screenPublishing=false;
   let participantFocus=false,suppressTileClickUntil=0,pipPosition=null;
   let meetingRecorder=null,meetingRecordStream=null,meetingRecordChunks=[];
@@ -173,6 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else if(screenOwnerId===sid){
       screenOwnerId=null;
       annotationTool='select';annotationEnabled=false;annotationToolbarClosed=false;
+      closePersistentAnnotationToolbar();
       const fallback=[...document.querySelectorAll('#videoGrid .tile')].find(x=>x.dataset.peerTile===id)||document.querySelector('#videoGrid .tile');
       if(fallback)selectMainTile(fallback.dataset.peerTile);
     }
@@ -261,6 +263,15 @@ document.addEventListener('DOMContentLoaded', () => {
     c.style.pointerEvents='none';
     roomEl.appendChild(c);
 
+    const floatBtn=document.createElement('button');
+    floatBtn.id='annotationFloatBtn';
+    floatBtn.type='button';
+    floatBtn.title='Open floating annotation toolbar';
+    floatBtn.setAttribute('aria-label','Open floating annotation toolbar');
+    floatBtn.innerHTML='<span>✎</span><small>Annotate</small>';
+    roomEl.appendChild(floatBtn);
+    floatBtn.addEventListener('click',()=>openPersistentAnnotationToolbar());
+
     let drawing=false,current=null,lastBroadcast=0;
     const pos=e=>{
       const r=c.getBoundingClientRect();
@@ -276,10 +287,11 @@ document.addEventListener('DOMContentLoaded', () => {
       c.style.cursor=tool==='text'?'text':annotationEnabled?'crosshair':'default';
       $('#annColorPalette')?.classList.remove('open');
       sync();
+      syncPersistentAnnotationToolbar();
     }
     function commit(obj){
       if(!obj)return;
-      annotationStrokes.push(obj);redoStrokes=[];current=null;drawing=false;drawAnnotations();sendAnnotationState();
+      annotationStrokes.push(obj);redoStrokes=[];current=null;drawing=false;drawAnnotations();sendAnnotationState();syncPersistentAnnotationToolbar();
     }
     function makeShape(tool,a,b){return{type:tool,color:annotationColor,points:[a,b]}};
 
@@ -288,12 +300,13 @@ document.addEventListener('DOMContentLoaded', () => {
     $('#annColorPalette')?.querySelectorAll('[data-ann-color]').forEach(btn=>btn.addEventListener('click',e=>{
       e.preventDefault();e.stopPropagation();annotationColor=btn.dataset.annColor||'#ff2f2f';
       $('#annColorDot')?.style.setProperty('background',annotationColor);$('#annColorPalette')?.classList.remove('open');
+      syncPersistentAnnotationToolbar();
     }));
     $('#annColorDot')?.style.setProperty('background',annotationColor);
 
-    $('#annUndo').onclick=()=>{if(!isHost()||!annotationStrokes.length)return;redoStrokes.push(annotationStrokes.pop());drawAnnotations();sendAnnotationState()};
-    $('#annRedo').onclick=()=>{if(!isHost()||!redoStrokes.length)return;annotationStrokes.push(redoStrokes.pop());drawAnnotations();sendAnnotationState()};
-    $('#annClose').onclick=()=>{annotationToolbarClosed=true;setTool('select');bar.classList.remove('visible')};
+    $('#annUndo').onclick=()=>{if(!isHost()||!annotationStrokes.length)return;redoStrokes.push(annotationStrokes.pop());drawAnnotations();sendAnnotationState();syncPersistentAnnotationToolbar()};
+    $('#annRedo').onclick=()=>{if(!isHost()||!redoStrokes.length)return;annotationStrokes.push(redoStrokes.pop());drawAnnotations();sendAnnotationState();syncPersistentAnnotationToolbar()};
+    $('#annClose').onclick=()=>{annotationToolbarClosed=true;setTool('select');bar.classList.remove('visible');updateAnnotationFloatButton()};
 
     c.addEventListener('pointerdown',e=>{
       if(!isHost()||!annotationEnabled||!screenOwnerId)return;
@@ -339,6 +352,110 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('resize',()=>{resizeAnnotationCanvas();if(annotationToolbarPosition){const maxLeft=Math.max(6,window.innerWidth-bar.offsetWidth-6),maxTop=Math.max(6,window.innerHeight-bar.offsetHeight-6);annotationToolbarPosition.left=Math.min(maxLeft,annotationToolbarPosition.left);annotationToolbarPosition.top=Math.min(maxTop,annotationToolbarPosition.top);bar.style.setProperty('left',`${annotationToolbarPosition.left}px`,'important');bar.style.setProperty('top',`${annotationToolbarPosition.top}px`,'important');bar.style.setProperty('transform','none','important')}});
   }
 
+
+  function updateAnnotationFloatButton(){
+    const btn=$('#annotationFloatBtn');
+    if(!btn)return;
+    const active=!!screenOwnerId&&isHost();
+    const pipOpen=!!annotationPipWindow&&!annotationPipWindow.closed;
+    btn.classList.toggle('visible',active&&!pipOpen);
+  }
+
+  function closePersistentAnnotationToolbar(){
+    const w=annotationPipWindow;
+    annotationPipWindow=null;annotationPipOpening=false;annotationPipMinimized=false;
+    try{if(w&&!w.closed)w.close()}catch{}
+    updateAnnotationFloatButton();
+  }
+
+  function syncPersistentAnnotationToolbar(){
+    const w=annotationPipWindow;
+    if(!w||w.closed){annotationPipWindow=null;updateAnnotationFloatButton();return}
+    try{
+      const d=w.document;
+      d.querySelectorAll('[data-pip-tool]').forEach(b=>b.classList.toggle('active',b.dataset.pipTool===annotationTool));
+      const dot=d.getElementById('pipAnnColorDot');if(dot)dot.style.background=annotationColor;
+      const undo=d.getElementById('pipAnnUndo');if(undo)undo.disabled=!annotationStrokes.length;
+      const redo=d.getElementById('pipAnnRedo');if(redo)redo.disabled=!redoStrokes.length;
+      const status=d.getElementById('pipAnnStatus');if(status)status.textContent=screenOwnerId?'Screen sharing • Annotation ready':'Waiting for screen share';
+    }catch{}
+    updateAnnotationFloatButton();
+  }
+
+  function renderPersistentAnnotationToolbar(w){
+    const d=w.document;
+    d.title='MNT Annotation Toolbar';
+    d.head.innerHTML=`<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+      *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b0e13;color:#fff;font-family:Inter,"Segoe UI",Arial,sans-serif}
+      body{display:flex;align-items:center;justify-content:center}.pip-wrap{width:100%;height:100%;display:flex;align-items:center;padding:7px;background:rgba(11,14,19,.98)}
+      .pip-bar{display:flex;align-items:stretch;gap:2px;width:100%;min-width:max-content}.pip-tool{width:60px;min-width:60px;height:58px;border:0;border-radius:9px;background:transparent;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer}
+      .pip-tool:hover{background:#1b222c}.pip-tool.active{background:#0867d8;box-shadow:inset 0 0 0 1px #238cff}.pip-tool:disabled{opacity:.36;cursor:not-allowed}.ico{font-size:26px;line-height:27px}.pip-tool small{font-size:10px;font-weight:700;white-space:nowrap}
+      .sep{width:1px;height:46px;margin:6px 4px;background:rgba(255,255,255,.16)}.color-wrap{position:relative;display:flex}.dot{width:24px;height:24px;border:2px solid #fff;border-radius:50%}.palette{position:absolute;display:none;grid-template-columns:repeat(4,30px);gap:6px;left:0;top:60px;padding:8px;background:#111820;border:1px solid #ffffff29;border-radius:10px;box-shadow:0 10px 24px #0008}.palette.open{display:grid}.palette button{width:30px;height:30px;border-radius:50%;border:2px solid #dfe7f4;background:var(--sw);cursor:pointer}
+      .move-note{position:fixed;left:8px;bottom:2px;font-size:9px;color:#9aa7b7;pointer-events:none}.mini{display:none;width:100%;height:100%;align-items:center;justify-content:center}.mini button{border:0;border-radius:18px;background:#0867d8;color:white;font-size:16px;font-weight:800;padding:14px 20px;cursor:pointer}.minimized .pip-wrap{display:none}.minimized .mini{display:flex}
+      .min-btn .ico{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:#f02f45}.status{position:fixed;right:8px;bottom:2px;font-size:9px;color:#9aa7b7;pointer-events:none}
+    </style>`;
+    d.body.innerHTML=`<div class="pip-wrap"><div class="pip-bar">
+      <button class="pip-tool active" data-pip-tool="select" title="Mouse / Select"><span class="ico">↖</span><small>Select</small></button>
+      <button class="pip-tool" data-pip-tool="pen" title="Pencil"><span class="ico">✎</span><small>Pen</small></button>
+      <div class="color-wrap"><button class="pip-tool" id="pipAnnColor" title="Pencil color"><span class="dot" id="pipAnnColorDot"></span><small>Color</small></button><div class="palette" id="pipAnnPalette">
+        <button data-pip-color="#ff2f2f" style="--sw:#ff2f2f"></button><button data-pip-color="#ff9f1c" style="--sw:#ff9f1c"></button><button data-pip-color="#ffd60a" style="--sw:#ffd60a"></button><button data-pip-color="#25d366" style="--sw:#25d366"></button>
+        <button data-pip-color="#20b7ff" style="--sw:#20b7ff"></button><button data-pip-color="#7b61ff" style="--sw:#7b61ff"></button><button data-pip-color="#ffffff" style="--sw:#ffffff"></button><button data-pip-color="#111111" style="--sw:#111111"></button>
+      </div></div>
+      <button class="pip-tool" data-pip-tool="line"><span class="ico">╱</span><small>Line</small></button><button class="pip-tool" data-pip-tool="arrow"><span class="ico">→</span><small>Arrow</small></button><button class="pip-tool" data-pip-tool="rect"><span class="ico">□</span><small>Rectangle</small></button><button class="pip-tool" data-pip-tool="circle"><span class="ico">○</span><small>Circle</small></button><button class="pip-tool" data-pip-tool="text"><span class="ico">T</span><small>Text</small></button>
+      <span class="sep"></span><button class="pip-tool" id="pipAnnUndo"><span class="ico">↶</span><small>Undo</small></button><button class="pip-tool" id="pipAnnRedo"><span class="ico">↷</span><small>Redo</small></button><span class="sep"></span>
+      <button class="pip-tool" id="pipAnnMove" title="Drag this floating window itself to move it"><span class="ico">✥</span><small>Move</small></button><button class="pip-tool min-btn" id="pipAnnMin"><span class="ico">−</span><small>Minimize</small></button>
+    </div><div class="move-note">Move: drag the floating window</div><div class="status" id="pipAnnStatus"></div></div><div class="mini"><button id="pipAnnRestore">✎ Annotate</button></div>`;
+
+    d.querySelectorAll('[data-pip-tool]').forEach(btn=>btn.addEventListener('click',()=>{
+      $('#annotationToolbar [data-ann-tool="'+btn.dataset.pipTool+'"]')?.click();
+      syncPersistentAnnotationToolbar();
+    }));
+    d.getElementById('pipAnnColor')?.addEventListener('click',()=>d.getElementById('pipAnnPalette')?.classList.toggle('open'));
+    d.querySelectorAll('[data-pip-color]').forEach(btn=>btn.addEventListener('click',()=>{
+      const color=btn.dataset.pipColor;const mainBtn=$('#annColorPalette [data-ann-color="'+color+'"]');
+      if(mainBtn)mainBtn.click();else{annotationColor=color;syncPersistentAnnotationToolbar()}
+      d.getElementById('pipAnnPalette')?.classList.remove('open');
+    }));
+    d.getElementById('pipAnnUndo')?.addEventListener('click',()=>{$('#annUndo')?.click();syncPersistentAnnotationToolbar()});
+    d.getElementById('pipAnnRedo')?.addEventListener('click',()=>{$('#annRedo')?.click();syncPersistentAnnotationToolbar()});
+    d.getElementById('pipAnnMove')?.addEventListener('click',()=>{
+      const n=d.querySelector('.move-note');if(n){n.textContent='Move: drag this floating window';setTimeout(()=>{if(n)n.textContent='Move: drag the floating window'},1600)}
+    });
+    d.getElementById('pipAnnMin')?.addEventListener('click',()=>{
+      annotationPipMinimized=true;d.body.classList.add('minimized');try{w.resizeTo(190,82)}catch{}
+    });
+    d.getElementById('pipAnnRestore')?.addEventListener('click',()=>{
+      annotationPipMinimized=false;d.body.classList.remove('minimized');try{w.resizeTo(920,92)}catch{};syncPersistentAnnotationToolbar();
+    });
+    d.addEventListener('pointerdown',e=>{if(!e.target.closest('.color-wrap'))d.getElementById('pipAnnPalette')?.classList.remove('open')});
+    syncPersistentAnnotationToolbar();
+  }
+
+  async function openPersistentAnnotationToolbar(){
+    if(!isHost()||annotationPipOpening)return;
+    if(annotationPipWindow&&!annotationPipWindow.closed){try{annotationPipWindow.focus()}catch{};syncPersistentAnnotationToolbar();return}
+    annotationPipOpening=true;
+    try{
+      let w=null;
+      if(window.documentPictureInPicture?.requestWindow){
+        w=await window.documentPictureInPicture.requestWindow({width:920,height:92});
+      }else{
+        w=window.open('','MNTAnnotationToolbar','popup=yes,width=920,height=120,resizable=yes,scrollbars=no');
+        if(!w)throw new Error('Floating toolbar window was blocked');
+      }
+      annotationPipWindow=w;annotationPipMinimized=false;
+      renderPersistentAnnotationToolbar(w);
+      const onClose=()=>{if(annotationPipWindow===w){annotationPipWindow=null;annotationPipMinimized=false;updateAnnotationFloatButton()}};
+      w.addEventListener?.('pagehide',onClose,{once:true});
+      w.addEventListener?.('unload',onClose,{once:true});
+    }catch(e){
+      console.warn('floating annotation toolbar',e);
+      annotationPipWindow=null;
+      updateAnnotationFloatButton();
+      if(screenOwnerId)alert('Floating toolbar එක open කරන්න Annotate button එක click කරන්න. Browser එක Picture-in-Picture/Pop-up allow කරන්න.');
+    }finally{annotationPipOpening=false}
+  }
+
   function resizeAnnotationCanvas(){
     const c=$('#annotationCanvas');if(!c)return;const main=document.querySelector('#videoGrid .main-tile');if(!main)return;
     const r=main.getBoundingClientRect(),dpr=Math.min(2,window.devicePixelRatio||1);
@@ -353,6 +470,9 @@ document.addEventListener('DOMContentLoaded', () => {
     c.classList.toggle('visible',active);
     bar.classList.toggle('visible',active&&isHost()&&!annotationToolbarClosed);
     if(!active){annotationTool='select';annotationEnabled=false;c.style.pointerEvents='none';bar.querySelectorAll('[data-ann-tool]').forEach(b=>b.classList.toggle('active',b.dataset.annTool==='select'))}
+    updateAnnotationFloatButton();
+    syncPersistentAnnotationToolbar();
+    if(active&&isHost()&&!annotationPipWindow&&navigator.userActivation?.isActive){openPersistentAnnotationToolbar().catch(()=>{})}
     resizeAnnotationCanvas();
   }
   function drawAnnotations(extra){
@@ -470,6 +590,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function leave(silent=false){
     try{if(meetingRecorder&&meetingRecorder.state!=='inactive')meetingRecorder.stop()}catch{}
     try{if(room){await room.disconnect()}}catch{}
+    closePersistentAnnotationToolbar();
     room=null;screenPublishing=false;participantFocus=false;activeCode='';screenOwnerId=null;annotationStrokes=[];redoStrokes=[];annotationTool='select';annotationEnabled=false;annotationToolbarClosed=false;selectedPeerId=null;$('#videoGrid').innerHTML='';
     $('#room .meeting-room')?.classList.remove('mnt-guest-landscape-share');
     window.MNTMeetingUI?.closePanel?.();
@@ -479,7 +600,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(!room||screenPublishing)return;
     try{await room.localParticipant.setScreenShareEnabled(true,{audio:true,selfBrowserSurface:'exclude',surfaceSwitching:'include',systemAudio:'include'});setScreenOwner(identityFor(),true)}catch(e){console.warn('screen share',e)}
   }
-  async function stopScreen(){if(!room||!screenPublishing)return;try{await room.localParticipant.setScreenShareEnabled(false)}catch{}screenPublishing=false}
+  async function stopScreen(){if(!room||!screenPublishing)return;try{await room.localParticipant.setScreenShareEnabled(false)}catch{}screenPublishing=false;closePersistentAnnotationToolbar()}
 
   const create=safeClone($('#createBtn'));if(create)create.addEventListener('click',async()=>{requestAppFullscreen();const n=($('#meetingName')?.value||'Team Meeting').trim()||'Team Meeting';const pw=$('#meetingPassword')?.value||'';const code=Math.random().toString(36).slice(2,8);localStorage.setItem('mnt_last_meeting',JSON.stringify({name:n,code,password:pw,createdAt:new Date().toISOString()}));$('#shareBox span').textContent=roomLink(code);await join(code,'Host',n,true)});
   const copy=safeClone($('#copyBtn'));if(copy)copy.addEventListener('click',async()=>{const t=$('#shareBox span').textContent;try{await navigator.clipboard.writeText(t);alert('Meeting link copied.')}catch{alert(t)}});
@@ -526,7 +647,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   mic?.addEventListener('click',async()=>{if(!room)return;const p=room.localParticipant;const pub=p.getTrackPublication(LK.Track.Source.Microphone);const enabled=!!pub&&!pub.isMuted;p.setMicrophoneEnabled(!enabled);mic.classList.toggle('active-control',!enabled);mic.querySelector('small').textContent=!enabled?'Mute':'Unmute'});
   cam?.addEventListener('click',async()=>{if(!room)return;const p=room.localParticipant;const pub=p.getTrackPublication(LK.Track.Source.Camera);const enabled=!!pub&&!pub.isMuted;p.setCameraEnabled(!enabled);cam.classList.toggle('active-control',!enabled);cam.querySelector('small').textContent=!enabled?'Stop Video':'Start Video'});
-  share?.addEventListener('click',async()=>{if(screenPublishing)await stopScreen();else await startScreen()});
+  share?.addEventListener('click',async()=>{if(screenPublishing){await stopScreen()}else{await startScreen();updateAnnotationFloatButton();if(isHost()&&navigator.userActivation?.isActive&&!annotationPipWindow)openPersistentAnnotationToolbar().catch(()=>{})}});
 
   const moreBtn=[...$('#room .room-controls')?.querySelectorAll(':scope > button')||[]].find(b=>!b.classList.contains('leave')&&b.textContent.includes('More'));
   function formatRecordTime(ms){

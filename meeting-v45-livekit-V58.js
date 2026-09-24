@@ -232,7 +232,6 @@ document.addEventListener('DOMContentLoaded', () => {
     bar.innerHTML=`
       <button type="button" class="ann-tool active" id="annSelect" data-ann-tool="select" title="Mouse / Select"><span class="ann-icon">↖</span><small>Select</small></button>
       <button type="button" class="ann-tool" id="annPen" data-ann-tool="pen" title="Pencil"><span class="ann-icon">✎</span><small>Pen</small></button>
-      <button type="button" class="ann-tool" id="annOpenFile" title="Open image/PDF for annotation"><span class="ann-icon">▣</span><small>Open File</small></button>
       <div class="ann-color-wrap">
         <button type="button" class="ann-tool" id="annColor" title="Pencil color"><span class="ann-color-dot" id="annColorDot"></span><small>Color</small></button>
         <div class="ann-color-palette" id="annColorPalette" aria-label="Annotation colors">
@@ -263,6 +262,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const c=document.createElement('canvas');
     c.id='annotationCanvas';
     c.style.pointerEvents='none';
+    c.style.position='absolute';
+    c.style.inset='0';
+    c.style.width='100%';
+    c.style.height='100%';
+    c.style.zIndex='80';
+    c.style.touchAction='none';
+    c.style.userSelect='none';
+    c.style.webkitUserSelect='none';
     roomEl.appendChild(c);
 
     const floatBtn=document.createElement('button');
@@ -306,17 +313,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }));
     $('#annColorDot')?.style.setProperty('background',annotationColor);
 
-    const annFileInput=document.createElement('input');
-    annFileInput.type='file';annFileInput.accept='image/*,application/pdf';annFileInput.style.display='none';roomEl.appendChild(annFileInput);
-    $('#annOpenFile')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();annFileInput.value='';annFileInput.click()});
-    annFileInput.addEventListener('change',()=>{const f=annFileInput.files?.[0];if(f)openAnnotationFileWindow(f)});
-
     $('#annUndo').onclick=()=>{if(!isHost()||!annotationStrokes.length)return;redoStrokes.push(annotationStrokes.pop());drawAnnotations();sendAnnotationState();syncPersistentAnnotationToolbar()};
     $('#annRedo').onclick=()=>{if(!isHost()||!redoStrokes.length)return;annotationStrokes.push(redoStrokes.pop());drawAnnotations();sendAnnotationState();syncPersistentAnnotationToolbar()};
     $('#annClose').onclick=()=>{annotationToolbarClosed=true;setTool('select');bar.classList.remove('visible');updateAnnotationFloatButton()};
 
     c.addEventListener('pointerdown',e=>{
       if(!isHost()||!annotationEnabled||!screenOwnerId)return;
+      e.preventDefault();e.stopPropagation();
       const p=pos(e);
       if(annotationTool==='text'){
         const value=window.prompt('Text එක type කරන්න:','');
@@ -329,12 +332,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     c.addEventListener('pointermove',e=>{
       if(!drawing||!current)return;
+      e.preventDefault();e.stopPropagation();
       const p=pos(e);
       if(current.type==='pen')current.points.push(p);else current.points[1]=p;
       drawAnnotations(current);
       const now=performance.now();if(now-lastBroadcast>45){lastBroadcast=now;sendAnnotationLive(current)}
     });
-    const end=e=>{if(!drawing||!current)return;if(e?.pointerId!=null)try{c.releasePointerCapture?.(e.pointerId)}catch{};commit(current)};
+    const end=e=>{if(!drawing||!current)return;e?.preventDefault?.();e?.stopPropagation?.();if(e?.pointerId!=null)try{c.releasePointerCapture?.(e.pointerId)}catch{};commit(current)};
     c.addEventListener('pointerup',end);c.addEventListener('pointercancel',end);c.addEventListener('pointerleave',e=>{if(drawing&&e.buttons===0)end(e)});
 
     // Zoom-style movable toolbar. Drag with Move button or dotted grip.
@@ -404,7 +408,6 @@ document.addEventListener('DOMContentLoaded', () => {
     d.body.innerHTML=`<div class="pip-wrap"><div class="pip-bar">
       <button class="pip-tool active" data-pip-tool="select" title="Mouse / Select"><span class="ico">↖</span><small>Select</small></button>
       <button class="pip-tool" data-pip-tool="pen" title="Pencil"><span class="ico">✎</span><small>Pen</small></button>
-      <button class="pip-tool" id="pipAnnOpenFile" title="Open image/PDF"><span class="ico">▣</span><small>Open File</small></button>
       <div class="color-wrap"><button class="pip-tool" id="pipAnnColor" title="Pencil color"><span class="dot" id="pipAnnColorDot"></span><small>Color</small></button><div class="palette" id="pipAnnPalette">
         <button data-pip-color="#ff2f2f" style="--sw:#ff2f2f"></button><button data-pip-color="#ff9f1c" style="--sw:#ff9f1c"></button><button data-pip-color="#ffd60a" style="--sw:#ffd60a"></button><button data-pip-color="#25d366" style="--sw:#25d366"></button>
         <button data-pip-color="#20b7ff" style="--sw:#20b7ff"></button><button data-pip-color="#7b61ff" style="--sw:#7b61ff"></button><button data-pip-color="#ffffff" style="--sw:#ffffff"></button><button data-pip-color="#111111" style="--sw:#111111"></button>
@@ -529,7 +532,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function updateAnnotationLayer(){
     ensureAnnotationUI();const c=$('#annotationCanvas'),bar=$('#annotationToolbar');if(!c||!bar)return;
     const active=!!screenOwnerId&&selectedPeerId===screenOwnerId;const main=document.querySelector('#videoGrid .main-tile');
-    if(main&&!main.contains(c))main.appendChild(c);
+    if(main){
+      if(getComputedStyle(main).position==='static')main.style.position='relative';
+      if(!main.contains(c))main.appendChild(c);
+    }
     c.classList.toggle('visible',active);
     bar.classList.toggle('visible',active&&isHost()&&!annotationToolbarClosed);
     if(!active){annotationTool='select';annotationEnabled=false;c.style.pointerEvents='none';bar.querySelectorAll('[data-ann-tool]').forEach(b=>b.classList.toggle('active',b.dataset.annTool==='select'))}
@@ -678,10 +684,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   async function startScreen(){
     if(!room||screenPublishing)return;
-    if(annotationFileWindow&&!annotationFileWindow.closed){
-      try{annotationFileWindow.focus()}catch{}
-      alert('Share Screen window එකෙන් MNTClassFile window එක select කරන්න. Meeting Room tab/window එක select කරන්න එපා.');
-    }
     try{await room.localParticipant.setScreenShareEnabled(true,{audio:true,selfBrowserSurface:'exclude',surfaceSwitching:'include',systemAudio:'include'});setScreenOwner(identityFor(),true)}catch(e){console.warn('screen share',e)}
   }
   async function stopScreen(){if(!room||!screenPublishing)return;try{await room.localParticipant.setScreenShareEnabled(false)}catch{}screenPublishing=false;closePersistentAnnotationToolbar()}

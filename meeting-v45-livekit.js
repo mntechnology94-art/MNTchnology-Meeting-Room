@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let participantFocus=false,suppressTileClickUntil=0,pipPosition=null;
   let meetingRecorder=null,meetingRecordStream=null,meetingRecordChunks=[];
   let meetingRecordCanvas=null,meetingRecordCanvasStream=null,meetingRecordRaf=0,meetingRecordAudioCtx=null,meetingRecordAudioDest=null,meetingRecordAudioSources=[];
+  let meetingRecordStartedAt=0,meetingRecordPausedAt=0,meetingRecordPausedTotal=0,meetingRecordUiTimer=0;
   sessionStorage.setItem('mnt_peer_id',peerId);
 
   function requestAppFullscreen(){
@@ -274,13 +275,15 @@ document.addEventListener('DOMContentLoaded', () => {
       room.on(LK.RoomEvent.LocalTrackPublished,(publication)=>{
         const track=publication.track;
         if(publication.source===LK.Track.Source.Camera){
-          const el=track?.attach?.()[0];
+          const attached=track?.attach?.();
+          const el=Array.isArray(attached)?attached[0]:attached;
           if(el){putVideo(peerId,el,name,'camera',true)}
         }
         if(publication.source===LK.Track.Source.ScreenShare){
           screenPublishing=true;
-          const el=track?.attach?.()[0];
-          if(el){const t=tile(`screen:${identityFor()}`,name);t.dataset.kind='screen';t.classList.add('screen-share-tile');el.autoplay=true;el.playsInline=true;el.style.width='100%';el.style.height='100%';el.style.objectFit='contain';t.prepend(el)}
+          const attached=track?.attach?.();
+          const el=Array.isArray(attached)?attached[0]:attached;
+          if(el){const t=tile(`screen:${identityFor()}`,name);t.dataset.kind='screen';t.classList.add('screen-share-tile');el.autoplay=true;el.playsInline=true;el.muted=true;el.style.width='100%';el.style.height='100%';el.style.objectFit='contain';t.prepend(el);el.play?.().catch(()=>{})}
           setScreenOwner(identityFor(),true)
         }
       });
@@ -361,17 +364,56 @@ document.addEventListener('DOMContentLoaded', () => {
   share?.addEventListener('click',async()=>{if(screenPublishing)await stopScreen();else await startScreen()});
 
   const moreBtn=[...$('#room .room-controls')?.querySelectorAll(':scope > button')||[]].find(b=>!b.classList.contains('leave')&&b.textContent.includes('More'));
+  function formatRecordTime(ms){
+    const total=Math.max(0,Math.floor(ms/1000));
+    const m=String(Math.floor(total/60)).padStart(2,'0');
+    const s=String(total%60).padStart(2,'0');
+    return `${m}:${s}`;
+  }
+  function currentRecordedMs(){
+    if(!meetingRecordStartedAt)return 0;
+    const now=performance.now();
+    const pausedNow=meetingRecorder?.state==='paused'&&meetingRecordPausedAt?now-meetingRecordPausedAt:0;
+    return Math.max(0,now-meetingRecordStartedAt-meetingRecordPausedTotal-pausedNow);
+  }
+  function ensureRecordingDock(){
+    let dock=document.getElementById('mntRecordingDock');
+    if(dock)return dock;
+    dock=document.createElement('div');
+    dock.id='mntRecordingDock';
+    dock.innerHTML='<span id="mntRecordingDockStatus">● REC 00:00</span><button type="button" id="mntRecordingPauseBtn">Ⅱ Pause</button><button type="button" id="mntRecordingStopBtn">■ Stop</button>';
+    $('#room .meeting-room')?.appendChild(dock);
+    dock.querySelector('#mntRecordingPauseBtn')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();toggleRecordingPause()});
+    dock.querySelector('#mntRecordingStopBtn')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();stopMeetingRecording()});
+    return dock;
+  }
+  function updateRecordingDock(){
+    const state=meetingRecorder?.state||'inactive';
+    const active=isHost()&&(state==='recording'||state==='paused');
+    const dock=document.getElementById('mntRecordingDock');
+    if(!active){dock?.remove();if(meetingRecordUiTimer){clearInterval(meetingRecordUiTimer);meetingRecordUiTimer=0}return}
+    const d=ensureRecordingDock();
+    const status=d.querySelector('#mntRecordingDockStatus');
+    const pause=d.querySelector('#mntRecordingPauseBtn');
+    if(status)status.textContent=state==='paused'?`Ⅱ PAUSED ${formatRecordTime(currentRecordedMs())}`:`● REC ${formatRecordTime(currentRecordedMs())}`;
+    if(pause)pause.textContent=state==='paused'?'▶ Resume':'Ⅱ Pause';
+    d.classList.toggle('paused',state==='paused');
+    if(!meetingRecordUiTimer)meetingRecordUiTimer=setInterval(()=>{if(meetingRecorder?.state==='recording'||meetingRecorder?.state==='paused')updateRecordingDock();else{clearInterval(meetingRecordUiTimer);meetingRecordUiTimer=0}},500);
+  }
   function syncHostRecordControl(){
     if(!moreBtn)return;
     moreBtn.classList.toggle('mnt-record-control',isHost());
     moreBtn.dataset.hostRecord=isHost()?'1':'0';
     const small=moreBtn.querySelector('small');
-    if(small)small.textContent=isHost()?(meetingRecorder&&meetingRecorder.state!=='inactive'?'Stop Rec':'Record'):'More';
+    const state=meetingRecorder?.state||'inactive';
+    if(small)small.textContent=isHost()?((state==='recording'||state==='paused')?'Stop Rec':'Record'):'More';
     let badge=document.getElementById('mntRecordingBadge');
-    if(isHost()&&meetingRecorder&&meetingRecorder.state!=='inactive'){
-      if(!badge){badge=document.createElement('div');badge.id='mntRecordingBadge';badge.textContent='● REC';$('#room .meeting-room')?.appendChild(badge)}
-      badge.classList.add('show');
+    if(isHost()&&(state==='recording'||state==='paused')){
+      if(!badge){badge=document.createElement('div');badge.id='mntRecordingBadge';$('#room .meeting-room')?.appendChild(badge)}
+      badge.textContent=state==='paused'?'Ⅱ PAUSED':'● REC';
+      badge.classList.toggle('paused',state==='paused');
     }else badge?.remove();
+    updateRecordingDock();
   }
   function drawVideoFit(ctx,video,x,y,w,h,fit='cover'){
     const vw=video?.videoWidth||0,vh=video?.videoHeight||0;
@@ -384,6 +426,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if(sr>dr){sw=vh*dr;sx=(vw-sw)/2}else{sh=vw/dr;sy=(vh-sh)/2}
     }
     try{ctx.drawImage(video,sx,sy,sw,sh,dx,dy,dw,dh)}catch{ctx.fillStyle='#071329';ctx.fillRect(x,y,w,h)}
+  }
+  function currentScreenVideo(){
+    const tiles=[...document.querySelectorAll('#videoGrid .tile[data-kind="screen"]')];
+    const preferred=tiles.find(t=>t.dataset.peerTile===screenOwnerId)||tiles.find(t=>t.classList.contains('screen-share-tile'))||tiles[0];
+    const v=preferred?.querySelector('video');
+    return v&&v.readyState>=2?v:null;
+  }
+  function currentSelfVideo(){
+    const t=document.querySelector(`[data-peer-tile="${CSS.escape(peerId)}"]`);
+    const v=t?.querySelector('video');
+    return v&&v.readyState>=2?v:null;
   }
   async function buildMeetingRecordingStream(){
     const grid=$('#videoGrid');
@@ -407,7 +460,21 @@ document.addEventListener('DOMContentLoaded', () => {
       const currentGrid=$('#videoGrid');
       const r=currentGrid?.getBoundingClientRect();
       ctx.fillStyle='#020b1d';ctx.fillRect(0,0,cw,ch);
-      if(currentGrid&&r&&r.width>0&&r.height>0){
+
+      /* If any screen is being shared, always record that screen full-size.
+         This is independent of whether the tile is hidden by the host UI. */
+      const shared=currentScreenVideo();
+      if(shared){
+        drawVideoFit(ctx,shared,0,0,cw,ch,'contain');
+        const self=currentSelfVideo();
+        if(self){
+          const pw=Math.round(cw*.22),ph=Math.round(pw*9/16),pad=Math.round(cw*.018);
+          const px=cw-pw-pad,py=ch-ph-pad;
+          ctx.fillStyle='#071329';ctx.fillRect(px,py,pw,ph);
+          drawVideoFit(ctx,self,px,py,pw,ph,'cover');
+          ctx.strokeStyle='#ffffff';ctx.lineWidth=Math.max(2,Math.round(cw/640));ctx.strokeRect(px,py,pw,ph);
+        }
+      }else if(currentGrid&&r&&r.width>0&&r.height>0){
         const scaleX=cw/r.width,scaleY=ch/r.height;
         [...currentGrid.querySelectorAll('.tile')].forEach(t=>{
           const cs=getComputedStyle(t);if(cs.display==='none'||cs.visibility==='hidden'||t.offsetWidth===0||t.offsetHeight===0)return;
@@ -461,34 +528,71 @@ document.addEventListener('DOMContentLoaded', () => {
     meetingRecordAudioDest=null;
     try{meetingRecordAudioCtx?.close?.()}catch{}meetingRecordAudioCtx=null;
     meetingRecordStream?.getTracks().forEach(t=>t.stop());meetingRecordStream=null;
+    meetingRecordStartedAt=0;meetingRecordPausedAt=0;meetingRecordPausedTotal=0;
+    if(meetingRecordUiTimer){clearInterval(meetingRecordUiTimer);meetingRecordUiTimer=0}
+    document.getElementById('mntRecordingDock')?.remove();
+  }
+  function stopMeetingRecording(){
+    if(!meetingRecorder||meetingRecorder.state==='inactive')return;
+    try{meetingRecorder.stop()}catch(e){console.warn('recording stop',e)}
+  }
+  function toggleRecordingPause(){
+    if(!meetingRecorder||meetingRecorder.state==='inactive')return;
+    try{
+      if(meetingRecorder.state==='recording'){
+        meetingRecorder.pause();
+        meetingRecordPausedAt=performance.now();
+      }else if(meetingRecorder.state==='paused'){
+        if(meetingRecordPausedAt){meetingRecordPausedTotal+=performance.now()-meetingRecordPausedAt;meetingRecordPausedAt=0}
+        meetingRecorder.resume();
+      }
+      syncHostRecordControl();
+    }catch(e){console.warn('recording pause/resume',e);alert('Recording pause/resume කරන්න බැරි වුණා.')}
   }
   async function toggleMeetingRecording(){
     if(!isHost())return;
-    if(meetingRecorder&&meetingRecorder.state!=='inactive'){meetingRecorder.stop();return}
+    if(meetingRecorder&&meetingRecorder.state!=='inactive'){stopMeetingRecording();return}
     try{
       meetingRecordChunks=[];
       meetingRecordStream=await buildMeetingRecordingStream();
-      const mimeTypes=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm;codecs=vp8','video/webm'];
+      /* MP4 is preferred where the browser supports it because it saves with
+         normal duration/index metadata, so the downloaded file can be seeked. */
+      const mimeTypes=[
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+        'video/mp4;codecs=avc1,mp4a.40.2',
+        'video/mp4',
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm;codecs=vp8',
+        'video/webm'
+      ];
       const mimeType=mimeTypes.find(x=>MediaRecorder.isTypeSupported?.(x))||'';
-      meetingRecorder=new MediaRecorder(meetingRecordStream,mimeType?{mimeType,videoBitsPerSecond:3500000}:undefined);
+      meetingRecorder=new MediaRecorder(meetingRecordStream,mimeType?{mimeType,videoBitsPerSecond:4500000,audioBitsPerSecond:128000}:undefined);
       meetingRecorder.ondataavailable=e=>{if(e.data?.size)meetingRecordChunks.push(e.data)};
       meetingRecorder.onerror=e=>{console.warn('recording error',e);alert('Recording error එකක් ආවා. Browser permissions/check කරන්න.')};
+      meetingRecorder.onpause=syncHostRecordControl;
+      meetingRecorder.onresume=syncHostRecordControl;
       meetingRecorder.onstop=()=>{
         const recorder=meetingRecorder;
         const chunks=[...meetingRecordChunks];
         try{
           if(chunks.length){
-            const type=recorder?.mimeType||'video/webm';
+            const type=recorder?.mimeType||mimeType||'video/webm';
             const blob=new Blob(chunks,{type});
+            const isMp4=/mp4/i.test(type);
+            const ext=isMp4?'mp4':'webm';
             const url=URL.createObjectURL(blob);
-            const a=document.createElement('a');a.href=url;a.download=`MNTchnology-Meeting-${new Date().toISOString().replace(/[:.]/g,'-')}.webm`;
-            document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);
+            const a=document.createElement('a');a.href=url;a.download=`MNTchnology-Meeting-${new Date().toISOString().replace(/[:.]/g,'-')}.${ext}`;
+            document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);
           }else alert('Recording data save වුණේ නැහැ. නැවත try කරන්න.');
         }catch(e){console.warn('recording save',e);alert('Recording save කරන්න බැරි වුණා.')}
         cleanupMeetingRecording();meetingRecorder=null;meetingRecordChunks=[];
         moreBtn?.classList.remove('mnt-recording');syncHostRecordControl();
       };
-      meetingRecorder.start(1000);
+      /* No timeslice: let the browser finalize one indexed file on Stop.
+         This gives normal seeking/fast-forward behavior in modern Chromium. */
+      meetingRecorder.start();
+      meetingRecordStartedAt=performance.now();meetingRecordPausedAt=0;meetingRecordPausedTotal=0;
       moreBtn?.classList.add('mnt-recording');syncHostRecordControl();
     }catch(e){
       console.warn('recording',e);cleanupMeetingRecording();meetingRecorder=null;meetingRecordChunks=[];moreBtn?.classList.remove('mnt-recording');syncHostRecordControl();

@@ -42,6 +42,29 @@ document.addEventListener('DOMContentLoaded', () => {
   const participantByIdentity=id=>room?.remoteParticipants?.get(id)||null;
   const displayNameForParticipant=p=>p?.name||p?.identity?.replace(/^(host|guest)-/,'')||'Guest';
 
+  function syncGuestLandscapeShareMode(){
+    const meeting=$('#room .meeting-room');
+    const grid=$('#videoGrid');
+    if(!meeting||!grid)return;
+    const isLandscape=window.matchMedia?.('(orientation: landscape)')?.matches ?? (window.innerWidth>window.innerHeight);
+    const phoneLandscape=isLandscape && Math.min(window.innerWidth,window.innerHeight)<=600;
+    const hostScreen=[...grid.querySelectorAll('.tile[data-kind="screen"]')]
+      .find(t=>String(t.dataset.peerTile||'').startsWith('screen:host-'))||null;
+    const active=!isHost() && phoneLandscape && !!hostScreen;
+    meeting.classList.toggle('mnt-guest-landscape-share',active);
+    if(active){
+      window.MNTMeetingUI?.closePanel?.();
+      const target=hostScreen.dataset.peerTile;
+      if(selectedPeerId!==target||!participantFocus){
+        selectedPeerId=target;
+        participantFocus=true;
+        applyVideoLayout();
+      }
+    }
+  }
+  window.addEventListener('resize',()=>requestAnimationFrame(syncGuestLandscapeShareMode));
+  window.addEventListener('orientationchange',()=>setTimeout(syncGuestLandscapeShareMode,180));
+
   function tile(id,n){
     let t=document.querySelector(`[data-peer-tile="${CSS.escape(id)}"]`);if(t)return t;
     t=document.createElement('div');t.className='tile';t.dataset.peerTile=id;
@@ -141,6 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(t)t.classList.toggle('screen-share-tile',!!active);
     if(active){screenOwnerId=sid;selectMainTile(sid)}
     else if(screenOwnerId===sid){screenOwnerId=null;const fallback=[...document.querySelectorAll('#videoGrid .tile')].find(x=>x.dataset.peerTile===id)||document.querySelector('#videoGrid .tile');if(fallback)selectMainTile(fallback.dataset.peerTile)}
+    requestAnimationFrame(syncGuestLandscapeShareMode);
   }
   function putVideo(id,videoEl,n,type='camera',muted=false){
     const tileId=type==='screen'?`screen:${id}`:id;const t=tile(tileId,n);t.dataset.kind=type;
@@ -278,6 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try{if(meetingRecorder&&meetingRecorder.state!=='inactive')meetingRecorder.stop()}catch{}
     try{if(room){await room.disconnect()}}catch{}
     room=null;screenPublishing=false;participantFocus=false;activeCode='';screenOwnerId=null;annotationStrokes=[];redoStrokes=[];selectedPeerId=null;$('#videoGrid').innerHTML='';
+    $('#room .meeting-room')?.classList.remove('mnt-guest-landscape-share');
     window.MNTMeetingUI?.closePanel?.();
     if(!silent){showPage('home');await exitAppFullscreen()}
   }
@@ -302,8 +327,34 @@ document.addEventListener('DOMContentLoaded', () => {
   const chatInput=$('#chatPanel .chat-input input');chatInput?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();chatSend?.click()}});
   const peopleBtn=safeClone($('#peopleBtn'));if(peopleBtn)peopleBtn.addEventListener('click',()=>{window.MNTMeetingUI?.togglePanel?.('participants');renderPeople()});
   const controls=$$('#room .room-controls > button');const mic=controls[0],cam=controls[1],share=$('#room .share');
-  const switchCamBtn=document.createElement('button');switchCamBtn.id='switchCameraBtn';switchCamBtn.innerHTML='🔄<small>Camera</small>';switchCamBtn.title='Switch camera';$('#room .room-controls')?.insertBefore(switchCamBtn,share);
-  switchCamBtn.addEventListener('click',async()=>{if(!room)return;const cams=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');if(cams.length<2){alert('Only one camera is available on this device.');return}const idx=Math.max(0,cams.findIndex(d=>d.deviceId===currentCameraDeviceId));currentCameraDeviceId=cams[(idx+1)%cams.length].deviceId;try{await room.switchActiveDevice('videoinput',currentCameraDeviceId)}catch(e){console.warn('camera switch',e)}});
+  const switchCamBtn=document.createElement('button');
+  switchCamBtn.id='switchCameraBtn';
+  switchCamBtn.innerHTML='<small>Switch Cam</small>';
+  switchCamBtn.title='Switch front / back camera or webcam';
+  switchCamBtn.setAttribute('aria-label','Switch camera');
+  $('#room .room-controls')?.insertBefore(switchCamBtn,share);
+  switchCamBtn.addEventListener('click',async()=>{
+    if(!room||!navigator.mediaDevices?.enumerateDevices)return;
+    try{
+      const cameraPub=room.localParticipant.getTrackPublication(LK.Track.Source.Camera);
+      const currentTrack=cameraPub?.track?.mediaStreamTrack;
+      const activeDeviceId=currentTrack?.getSettings?.().deviceId||currentCameraDeviceId||'';
+      const cams=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput'&&d.deviceId);
+      if(cams.length<2){alert('මෙම device එකේ මාරු කරන්න වෙනත් camera එකක් හමු වුණේ නැහැ.');return}
+      let idx=cams.findIndex(d=>d.deviceId===activeDeviceId);
+      if(idx<0)idx=0;
+      const next=cams[(idx+1)%cams.length];
+      currentCameraDeviceId=next.deviceId;
+      switchCamBtn.disabled=true;
+      await room.switchActiveDevice('videoinput',next.deviceId);
+      setTimeout(renderLocalCamera,120);
+    }catch(e){
+      console.warn('camera switch',e);
+      alert('Camera මාරු කරන්න බැරි වුණා. Camera permission එක check කරන්න.');
+    }finally{
+      switchCamBtn.disabled=false;
+    }
+  });
   mic?.addEventListener('click',async()=>{if(!room)return;const p=room.localParticipant;const pub=p.getTrackPublication(LK.Track.Source.Microphone);const enabled=!!pub&&!pub.isMuted;p.setMicrophoneEnabled(!enabled);mic.classList.toggle('active-control',!enabled);mic.querySelector('small').textContent=!enabled?'Mute':'Unmute'});
   cam?.addEventListener('click',async()=>{if(!room)return;const p=room.localParticipant;const pub=p.getTrackPublication(LK.Track.Source.Camera);const enabled=!!pub&&!pub.isMuted;p.setCameraEnabled(!enabled);cam.classList.toggle('active-control',!enabled);cam.querySelector('small').textContent=!enabled?'Stop Video':'Start Video'});
   share?.addEventListener('click',async()=>{if(screenPublishing)await stopScreen();else await startScreen()});

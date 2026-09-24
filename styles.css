@@ -524,3 +524,139 @@ body.mnt-in-room .app-shell{min-height:100dvh;background:var(--mnt-bg)!important
     height:68px!important;
   }
 }
+
+
+/* ================================================================
+   V53 — Guest landscape screen-share mode + camera switch control
+   ================================================================ */
+
+#room .mnt-reference-layout #switchCameraBtn{
+  display:flex!important;
+}
+#room .mnt-reference-layout #switchCameraBtn::before{
+  content:"↻"!important;
+  color:#eef6ff!important;
+  font-size:34px!important;
+  font-weight:700!important;
+  letter-spacing:0!important;
+}
+#room .mnt-reference-layout #switchCameraBtn:disabled{
+  opacity:.55!important;
+  cursor:wait!important;
+}
+
+@media (orientation:landscape) and (max-height:600px){
+  body.mnt-in-room:has(#room .mnt-reference-layout.mnt-guest-landscape-share){
+    overflow:hidden!important;
+    background:#000!important;
+  }
+  #room.active-page:has(.mnt-reference-layout.mnt-guest-landscape-share){
+    position:fixed!important;
+    inset:0!important;
+    width:100vw!important;
+    height:100dvh!important;
+    z-index:99999!important;
+    margin:0!important;
+    padding:0!important;
+    overflow:hidden!important;
+    background:#000!important;
+  }
+  #room .mnt-reference-layout.mnt-guest-landscape-share{
+    position:fixed!important;
+    inset:0!important;
+    width:100vw!important;
+    height:100dvh!important;
+    min-height:0!important;
+    margin:0!important;
+    padding:0!important;
+    background:#000!important;
+    overflow:hidden!important;
+  }
+  #room .mnt-reference-layout.mnt-guest-landscape-share .room-top,
+  #room .mnt-reference-layout.mnt-guest-landscape-share .room-controls,
+  #room .mnt-reference-layout.mnt-guest-landscape-share .mnt-right-rail,
+  #room .mnt-reference-layout.mnt-guest-landscape-share #annotationToolbar{
+    display:none!important;
+  }
+  #room .mnt-reference-layout.mnt-guest-landscape-share .mnt-meeting-body,
+  #room .mnt-reference-layout.mnt-guest-landscape-share .mnt-stage-column{
+    display:block!important;
+    position:absolute!important;
+    inset:0!important;
+    width:100%!important;
+    height:100%!important;
+    min-width:0!important;
+    min-height:0!important;
+    margin:0!important;
+    padding:0!important;
+    gap:0!important;
+    background:#000!important;
+  }
+  #room .mnt-reference-layout.mnt-guest-landscape-share .video-grid,
+  #room .mnt-reference-layout.mnt-guest-landscape-share .video-grid.focus-mode,
+  #room .mnt-reference-layout.mnt-guest-landscape-share .video-grid.participant-focus-mode{
+    display:block!important;
+    position:absolute!important;
+    inset:0!important;
+    width:100%!important;
+    height:100%!important;
+    min-width:0!important;
+    min-height:0!important;
+    margin:0!important;
+    padding:0!important;
+    gap:0!important;
+    overflow:hidden!important;
+    background:#000!important;
+  }
+  #room .mnt-reference-layout.mnt-guest-landscape-share .video-grid .tile{
+    display:none!important;
+  }
+  #room .mnt-reference-layout.mnt-guest-landscape-share .video-grid .tile.main-tile[data-kind="screen"],
+  #room .mnt-reference-layout.mnt-guest-landscape-share .video-grid .tile.main-tile.screen-share-tile{
+    display:block!important;
+    position:absolute!important;
+    inset:0!important;
+    width:100%!important;
+    height:100%!important;
+    min-width:0!important;
+    min-height:0!important;
+    max-width:none!important;
+    max-height:none!important;
+    margin:0!important;
+    padding:0!important;
+    border:0!important;
+    border-radius:0!important;
+    box-shadow:none!important;
+    background:#000!important;
+  }
+  #room .mnt-reference-layout.mnt-guest-landscape-share .video-grid .tile.main-tile[data-kind="screen"] video,
+  #room .mnt-reference-layout.mnt-guest-landscape-share .video-grid .tile.main-tile.screen-share-tile video{
+    display:block!important;
+    position:absolute!important;
+    inset:0!important;
+    width:100%!important;
+    height:100%!important;
+    object-fit:contain!important;
+    border:0!important;
+    border-radius:0!important;
+    background:#000!important;
+  }
+  #room .mnt-reference-layout.mnt-guest-landscape-share .video-grid .tile.self-pip{
+    display:none!important;
+  }
+}
+
+@media (max-width:520px) and (orientation:portrait){
+  #room .mnt-reference-layout .room-controls>button::before{
+    width:43px!important;
+    height:40px!important;
+    border-radius:14px!important;
+    font-size:18px!important;
+  }
+  #room .mnt-reference-layout #switchCameraBtn::before{
+    font-size:25px!important;
+  }
+  #room .mnt-reference-layout .room-controls small{
+    font-size:9px!important;
+  }
+}

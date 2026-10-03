@@ -48,6 +48,29 @@ document.addEventListener('DOMContentLoaded', () => {
   const participantByIdentity=id=>room?.remoteParticipants?.get(id)||null;
   const displayNameForParticipant=p=>p?.name||p?.identity?.replace(/^(host|guest)-/,'')||'Guest';
 
+  let activeSpeakerNotice=null;
+  function updateHostActiveSpeakerNotice(speakers=[]){
+    if(!isHost())return;
+    const guest=(speakers||[]).find(p=>p&&p.identity!==identityFor()&&String(p.identity||'').startsWith('guest-'));
+    if(!guest){
+      if(activeSpeakerNotice){activeSpeakerNotice.remove();activeSpeakerNotice=null}
+      return;
+    }
+    if(!activeSpeakerNotice){
+      activeSpeakerNotice=document.createElement('div');
+      activeSpeakerNotice.id='mntActiveSpeakerNotice';
+      Object.assign(activeSpeakerNotice.style,{
+        position:'fixed',top:'18px',left:'50%',transform:'translateX(-50%)',
+        zIndex:'10050',padding:'9px 16px',borderRadius:'999px',
+        background:'rgba(5,18,35,.88)',color:'#fff',fontWeight:'700',
+        fontSize:'14px',boxShadow:'0 4px 18px rgba(0,0,0,.28)',
+        pointerEvents:'none',maxWidth:'80vw',whiteSpace:'nowrap',
+        overflow:'hidden',textOverflow:'ellipsis'
+      });
+      document.body.appendChild(activeSpeakerNotice);
+    }
+    activeSpeakerNotice.textContent=`🎤 ${displayNameForParticipant(guest)} is speaking`;
+  }
   let guestControlsTimer=0;
   function showGuestLandscapeControls(){
     const meeting=$('#room .meeting-room');
@@ -691,6 +714,7 @@ document.addEventListener('DOMContentLoaded', () => {
       room=new LK.Room({adaptiveStream:true,dynacast:true});
       room.on(LK.RoomEvent.TrackSubscribed,(track,publication,participant)=>{attachTrack(track,participant,publication.source);setRoomMeta(activeTitle,`● ${room.remoteParticipants.size+1} participant${room.remoteParticipants.size+1===1?'':'s'}`);renderPeople();updateAnnotationLayer()});
       room.on(LK.RoomEvent.TrackUnsubscribed,(track,publication,participant)=>{detachTrack(track,participant,publication.source);renderPeople();updateAnnotationLayer()});
+      room.on(LK.RoomEvent.ActiveSpeakersChanged,speakers=>updateHostActiveSpeakerNotice(speakers));
       room.on(LK.RoomEvent.ParticipantConnected,p=>{tile(p.identity,displayNameForParticipant(p));renderPeople();applyVideoLayout();setRoomMeta(activeTitle,`● ${room.remoteParticipants.size+1} participants`)});
       room.on(LK.RoomEvent.ParticipantDisconnected,p=>{
         document.querySelector(`[data-peer-tile="${CSS.escape(p.identity)}"]`)?.remove();
@@ -729,6 +753,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function leave(silent=false){
+    try{activeSpeakerNotice?.remove();activeSpeakerNotice=null}catch{}
     try{if(!silent&&isHost()&&room){await publishData({kind:'host-ended-meeting'},true);await new Promise(resolve=>setTimeout(resolve,180))}}catch{}
     try{if(meetingRecorder&&meetingRecorder.state!=='inactive')meetingRecorder.stop()}catch{}
     try{if(room){await room.disconnect()}}catch{}

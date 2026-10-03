@@ -714,7 +714,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
       room.on(LK.RoomEvent.LocalTrackUnpublished,(publication)=>{if(publication.source===LK.Track.Source.ScreenShare){screenPublishing=false;document.querySelector(`[data-peer-tile="${CSS.escape('screen:'+identityFor())}"]`)?.remove();setScreenOwner(identityFor(),false)}});
-      room.on(LK.RoomEvent.DataReceived,(payload,participant)=>{try{const msg=JSON.parse(new TextDecoder().decode(payload));if(msg.kind==='chat'){chatAdd(msg.name||displayNameForParticipant(participant),msg.text,msg.time)}else if(msg.kind==='annotation-state'&&participant?.identity!==identityFor()){annotationStrokes=Array.isArray(msg.strokes)?msg.strokes:[];redoStrokes=[];drawAnnotations()}else if(msg.kind==='annotation-live'&&participant?.identity!==identityFor()){annotationStrokes=Array.isArray(msg.strokes)?msg.strokes:[];drawAnnotations(msg.live||null)}}catch{}});
+      room.on(LK.RoomEvent.DataReceived,(payload,participant)=>{try{const msg=JSON.parse(new TextDecoder().decode(payload));if(msg.kind==='host-ended-meeting'&&String(participant?.identity||'').startsWith('host-')&&!isHost()){leave(false);return}if(msg.kind==='chat'){chatAdd(msg.name||displayNameForParticipant(participant),msg.text,msg.time)}else if(msg.kind==='annotation-state'&&participant?.identity!==identityFor()){annotationStrokes=Array.isArray(msg.strokes)?msg.strokes:[];redoStrokes=[];drawAnnotations()}else if(msg.kind==='annotation-live'&&participant?.identity!==identityFor()){annotationStrokes=Array.isArray(msg.strokes)?msg.strokes:[];drawAnnotations(msg.live||null)}}catch{}});
       room.on(LK.RoomEvent.Disconnected,()=>setRoomMeta(activeTitle,'Disconnected'));
       await room.connect(creds.server_url,creds.participant_token);
       ensureParticipantTiles();
@@ -729,6 +729,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function leave(silent=false){
+    try{if(!silent&&isHost()&&room){await publishData({kind:'host-ended-meeting'},true);await new Promise(resolve=>setTimeout(resolve,180))}}catch{}
     try{if(meetingRecorder&&meetingRecorder.state!=='inactive')meetingRecorder.stop()}catch{}
     try{if(room){await room.disconnect()}}catch{}
     closePersistentAnnotationToolbar();
